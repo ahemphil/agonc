@@ -1,0 +1,7 @@
+# c-testsuite: tests that are not C89 though the classifier does not say so,
+# each with the reason; they run in the default mode (run_suite.py).
+00054.c C99 (a comma after the last enumerator)
+00055.c C99 (a comma after the last enumerator)
+00149.c C99 (a compound literal)
+00170.c GNU (an enum tag used before its definition)
+00209.c GNU (an enum tag used before its definition)

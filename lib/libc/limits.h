@@ -1,0 +1,31 @@
+/* limits.h - the integer types' sizes (abi.md section 2): char is 8 bits
+ * and signed, short 16, int 24, long 32, and (C99's, not in strict mode)
+ * long long 64. */
+
+#ifndef _LIMITS_H
+#define _LIMITS_H
+
+#define CHAR_BIT 8
+#define SCHAR_MIN (-128)
+#define SCHAR_MAX 127
+#define UCHAR_MAX 255
+#define CHAR_MIN (-128)
+#define CHAR_MAX 127
+#define MB_LEN_MAX 1
+#define SHRT_MIN (-32767 - 1)
+#define SHRT_MAX 32767
+#define USHRT_MAX 65535
+#define INT_MIN (-8388607 - 1)
+#define INT_MAX 8388607
+#define UINT_MAX 16777215U
+#define LONG_MIN (-2147483647L - 1)
+#define LONG_MAX 2147483647L
+#define ULONG_MAX 4294967295UL
+
+#if !defined(__STRICT_ANSI__)
+#define LLONG_MIN (-9223372036854775807LL - 1)
+#define LLONG_MAX 9223372036854775807LL
+#define ULLONG_MAX 18446744073709551615ULL
+#endif
+
+#endif

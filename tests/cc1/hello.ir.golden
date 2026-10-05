@@ -1,0 +1,16 @@
+IR 2
+U hello.c 6d74
+F main g 0 @ -
+S 1 "hello, world"
+SA 1
+ARG
+CALL puts 1 i
+DROP
+C 42
+ARG
+CALL agon_emu_exit 1 v
+DROP
+C 0
+RET
+FRAME 0
+E

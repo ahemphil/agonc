@@ -1,0 +1,5 @@
+-O
+-Werror
+-Wl,--moslet
+src/agonc/agonc.c
+src/agonc/sys.c

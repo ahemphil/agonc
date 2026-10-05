@@ -1,0 +1,38 @@
+	assume adl=1
+	org 0x040000
+	jp $+0x45
+	align 64
+	db "MOS",0,1
+__bss_size:	equ 9
+__bss_base:	equ 0x0B0000-__bss_size
+__stack_top:	equ __bss_base
+_count:	equ __bss_base+0
+__s1ef6_state:	equ __bss_base+3
+__start:
+        ld      sp, __stack_top
+        call    _main
+__exit:
+        ret
+_odd:
+        call    _even
+        jp      __exit
+_even:
+        call    _odd
+        ret
+__s1ef6_bump:
+        ld      hl, __s1ef6_state
+        inc     (hl)
+        ret
+_helper:
+        call    __s1ef6_bump
+        ret
+_main:
+        ld      hl, (_count)            ; an inline comment, kept
+        call    _even
+        call    _helper
+        ret
+_leaf:
+        ret
+_table:
+        dl      _leaf
+__image_end:

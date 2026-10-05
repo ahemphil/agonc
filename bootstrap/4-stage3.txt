@@ -1,0 +1,57 @@
+cd /agonc
+echo 4-stage3: stage 2 builds the compiler again into /agonc/s3
+agonc -o s3/cpp.bin @bootstrap/cpp.rsp
+agonc -o s3/cc1.bin @bootstrap/cc1.rsp
+agonc -o s3/cc2.bin @bootstrap/cc2.rsp
+agonc -o s3/ld.bin @bootstrap/ld.rsp
+agonc -o s3/agonc.bin @bootstrap/agonc.rsp
+echo ...and the C library's units
+agonc -O -Werror -c -o s3/ctype.s lib/libc/ctype.c
+agonc -O -Werror -c -o s3/malloc.s lib/libc/malloc.c
+agonc -O -Werror -c -o s3/stdio.s lib/libc/stdio.c
+agonc -O -Werror -c -o s3/stdlib.s lib/libc/stdlib.c
+agonc -O -Werror -c -o s3/string.s lib/libc/string.c
+agonc -O -Werror -c -o s3/exit.s lib/libc/exit.c
+agonc -O -Werror -c -o s3/time.s lib/libc/time.c
+agonc -O -Werror -c -o s3/fp.s lib/libc/fp.c
+agonc -O -Werror -c -o s3/math.s lib/libc/math.c
+agonc -O -Werror -c -o s3/ll.s lib/libc/ll.c
+agonc -O -Werror -c -o s3/mos.s lib/agon/mos.c
+agonc -O -Werror -c -o s3/uart.s lib/agon/uart.c
+agonc -O -Werror -c -o s3/vdp.s lib/agon/vdp.c
+agonc -O -Werror -c -o s3/mosapi.s lib/agon/mosapi.c
+agonc -O -Werror -c -o s3/sysvar.s lib/agon/sysvar.c
+agonc -O -Werror -c -o s3/vdpsys.s lib/agon/vdpsys.c
+agonc -O -Werror -c -o s3/vdpbmp.s lib/agon/vdpbmp.c
+agonc -O -Werror -c -o s3/vdpaudio.s lib/agon/vdpaudio.c
+agonc -O -Werror -c -o s3/vdpbuf.s lib/agon/vdpbuf.c
+agonc -O -Werror -c -o s3/vdpmore.s lib/agon/vdpmore.c
+agonc -O -Werror -c -o s3/handler.s lib/agon/handler.c
+echo Comparing stage 3 with stage 2
+compare s2/cpp.bin s3/cpp.bin
+compare s2/cc1.bin s3/cc1.bin
+compare s2/cc2.bin s3/cc2.bin
+compare s2/ld.bin s3/ld.bin
+compare s2/agonc.bin s3/agonc.bin
+compare out/ctype.s s3/ctype.s
+compare out/malloc.s s3/malloc.s
+compare out/stdio.s s3/stdio.s
+compare out/stdlib.s s3/stdlib.s
+compare out/string.s s3/string.s
+compare out/exit.s s3/exit.s
+compare out/time.s s3/time.s
+compare out/fp.s s3/fp.s
+compare out/math.s s3/math.s
+compare out/ll.s s3/ll.s
+compare out/mos.s s3/mos.s
+compare out/uart.s s3/uart.s
+compare out/vdp.s s3/vdp.s
+compare out/mosapi.s s3/mosapi.s
+compare out/sysvar.s s3/sysvar.s
+compare out/vdpsys.s s3/vdpsys.s
+compare out/vdpbmp.s s3/vdpbmp.s
+compare out/vdpaudio.s s3/vdpaudio.s
+compare out/vdpbuf.s s3/vdpbuf.s
+compare out/vdpmore.s s3/vdpmore.s
+compare out/handler.s s3/handler.s
+echo The bootstrap is complete: stage 3 is identical to stage 2.

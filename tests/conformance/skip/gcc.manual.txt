@@ -1,0 +1,13 @@
+# GCC torture tests: tests skipped by hand, each with its reason.
+pushpop_macro.c GNU_hard (#pragma push_macro/pop_macro, which the classifier does not detect)
+20021120-1.c LIMIT (one function beyond cc2's 4,000 instructions; GCC itself skips it on small targets as memory tight)
+medce-1.c GNU_hard (relies on the optimiser removing a call to an undefined function)
+pr105777.c ENV (includes a file from gcc.dg, which is not fetched)
+pr30314.c ENV (includes a file from gcc.dg, which is not fetched)
+pr98304-2.c ENV (includes a file from gcc.dg, which is not fetched)
+20101011-1.c ENV (expects integer division by zero to raise SIGFPE; the eZ80 has no trap)
+eeprof-1.c GNU_hard (-finstrument-functions)
+pr27364.c INT32 (an unsigned int product beyond 24 bits, which the classifier does not detect)
+pr40668.c INT32 (0x12345678 in an unsigned int, which the classifier does not detect)
+pr81913.c INT32 (~0xba64fc as a 32-bit int, which the classifier does not detect)
+va-arg-8.c C99 (plain inline, inside an #if on __LONG_LONG_MAX__ that the classifier does not evaluate)

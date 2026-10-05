@@ -1,0 +1,14 @@
+# SDCC's regression tests: test files that are not C89 though the
+# classifier does not say so, each with the reason; they run in the
+# default mode (run_suite.py).
+bug-2423.c SDCC (more initialisers than members, which SDCC accepts with a warning)
+bug-3007.c.in C99 (long long, in its instances)
+bug-3040.c.in C99 (long long, in some instances)
+gcc-torture-execute-20000113-1.c C99 (a non-constant initialiser for a local aggregate)
+gcc-torture-execute-20000605-3.c C99 (a non-constant initialiser for a local aggregate)
+gcc-torture-execute-20020529-1.c C99 (a non-constant initialiser for a local aggregate)
+gcc-torture-execute-20050929-1.c C99 (compound literals)
+gcc-torture-execute-930408-1.c GNU (an enum tag used before its definition)
+gcc-torture-execute-pr39100.c C99 (a non-constant initialiser for a local aggregate)
+gcc-torture-execute-pr86714.c GNU (a string longer than its array, which GCC truncates)
+punctuators.c C95 (digraphs)

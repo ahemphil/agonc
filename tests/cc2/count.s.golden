@@ -1,0 +1,37 @@
+;;agonc-object 1
+;;unit count.c 1337
+;;sect bss __s1337_total s 3
+;;sect code _add g
+;;ret i
+;;ref __ilts
+;;ref __s1337_total
+_add:
+	push ix
+	ld ix,0
+	add ix,sp
+	ld hl,-3
+	add hl,sp
+	ld sp,hl
+	ld hl,0
+	ld (ix-3),hl
+	ld hl,(ix-3)
+	ex de,hl
+	ld hl,(ix+6)
+	call __ilts
+	jr z,$+26
+	ld hl,(ix-3)
+	push hl
+	ld hl,(__s1337_total)
+	pop de
+	ex de,hl
+	add hl,de
+	ld (__s1337_total),hl
+	ld hl,(ix-3)
+	inc hl
+	ld (ix-3),hl
+	jr $-35
+	ld hl,(__s1337_total)
+	ld sp,ix
+	pop ix
+	ret
+;;end

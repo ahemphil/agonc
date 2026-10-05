@@ -1,0 +1,21 @@
+cd /agonc
+echo 2-stage2: the driver and the stage-1 passes build the compiler into /agonc/s2
+echo ...and the MOS and VDU library, /lib/libagon.s
+agonc -O -Werror -c -o out/uart.s lib/agon/uart.c
+agonc -O -Werror -c -o out/vdp.s lib/agon/vdp.c
+agonc -O -Werror -c -o out/mosapi.s lib/agon/mosapi.c
+agonc -O -Werror -c -o out/sysvar.s lib/agon/sysvar.c
+agonc -O -Werror -c -o out/vdpsys.s lib/agon/vdpsys.c
+agonc -O -Werror -c -o out/vdpbmp.s lib/agon/vdpbmp.c
+agonc -O -Werror -c -o out/vdpaudio.s lib/agon/vdpaudio.c
+agonc -O -Werror -c -o out/vdpbuf.s lib/agon/vdpbuf.c
+agonc -O -Werror -c -o out/vdpmore.s lib/agon/vdpmore.c
+agonc -O -Werror -c -o out/handler.s lib/agon/handler.c
+concat /lib/libagon.s out/uart.s out/vdp.s out/mosapi.s out/sysvar.s out/vdpsys.s out/vdpbmp.s out/vdpaudio.s out/vdpbuf.s out/vdpmore.s out/handler.s lib/agon/kbint.s
+agonc --index /lib/libagon.s
+agonc -o s2/cpp.bin @bootstrap/cpp.rsp
+agonc -o s2/cc1.bin @bootstrap/cc1.rsp
+agonc -o s2/cc2.bin @bootstrap/cc2.rsp
+agonc -o s2/ld.bin @bootstrap/ld.rsp
+agonc -o s2/agonc.bin @bootstrap/agonc.rsp
+echo 2-stage2 finished. Next: exec /agonc/bootstrap/3-install.txt

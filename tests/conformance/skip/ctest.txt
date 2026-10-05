@@ -1,0 +1,59 @@
+# ctest: tests skipped by the classifier (run_suite.py --update-skips).
+# Categories: C99 (a later standard), GNU_hard (a GNU extension not provided),
+# INT32 (assumes int has 32 bits), ENV (something MOS cannot do), no-checks.
+00001.c no-checks
+00046.c C99 (c11_anon_member)
+00048.c C99 (c99_designated_init)
+00049.c C99 (c99_designated_init)
+00050.c C99 (c11_anon_member)
+00056.c C99 (c99_mixed_decl_code)
+00060.c no-checks
+00071.c no-checks
+00074.c no-checks
+00075.c no-checks
+00080.c no-checks
+00083.c C99 (c99_variadic_macro)
+00084.c C99 (c99_variadic_macro)
+00085.c C99 (c99_variadic_macro)
+00092.c C99 (c99_designated_init)
+00094.c no-checks
+00097.c C99 no-checks (c99_variadic_macro)
+00099.c no-checks
+00104.c C99 (c99_header, c99_huge_const, c99_long_long, int32_big_const)
+00105.c no-checks
+00106.c no-checks
+00114.c no-checks
+00128.c no-checks (c99_long_long)
+00129.c C99 (c99_mixed_decl_code)
+00132.c C99 (c99_mixed_decl_code)
+00133.c no-checks (c99_long_long_suffix)
+00134.c no-checks (c99_long_long_suffix)
+00135.c no-checks (c99_long_long, c99_long_long_suffix)
+00136.c no-checks
+00141.c no-checks
+00145.c no-checks
+00147.c C99 (c99_designated_init)
+00148.c C99 (c99_designated_init)
+00150.c C99 (c99_designated_init)
+00151.c C99 (c99_designated_init)
+00152.c no-checks
+00154.c C99 (c99_mixed_decl_code)
+00155.c no-checks
+00162.c C99 no-checks (c99_array_param_qual, c99_restrict)
+00163.c C99 (c99_mixed_decl_code)
+00167.c C99 (c99_mixed_decl_code)
+00173.c C99 (c99_mixed_decl_code)
+00175.c C99 (c99_mixed_decl_code, float_kw, float_literal, float_printf)
+00176.c C99 (c99_mixed_decl_code)
+00185.c C99 (c99_mixed_decl_code)
+00187.c C99 (c99_mixed_decl_code, uses_files)
+00198.c C99 (c99_mixed_decl_code)
+00204.c C99 INT32 (c99_header, c99_huge_const, c99_long_long, c99_printf_len, float_kw, float_literal, float_printf, int32_big_const, int32_shift_ge24)
+00207.c C99 (c99_vla)
+00210.c C99 GNU_hard (c99_mixed_decl_code, gnu_attr_harmless, gnu_attr_semantic)
+00213.c GNU_hard (gnu_statement_expr)
+00214.c C99 GNU_hard (c99_bool, c99_mixed_decl_code, gnu_builtin_shim, gnu_statement_expr)
+00216.c C99 GNU_hard (c11_anon_member, c99_designated_init, c99_flexible_array_member, gnu_range_designator, gnu_zero_length_array)
+00218.c GNU_hard (ext_nonint_bitfield)
+00219.c C99 (c11_keyword, c99_long_long)
+00220.c C99 (c95_header, non_ascii_source)

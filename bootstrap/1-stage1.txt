@@ -1,0 +1,62 @@
+cd /
+echo 1-stage1: the AgDev-built passes build the C library, two tools and the driver
+echo The C library (11 units)
+/bin/agonc/cpp /agonc/lib/libc/ctype.c /agonc/out/ctype.i
+/bin/agonc/cc1 /agonc/out/ctype.i /agonc/out/ctype.ir -u ctype.c -Werror
+/bin/agonc/cc2 /agonc/out/ctype.ir /agonc/out/ctype.s -O
+/bin/agonc/cpp /agonc/lib/libc/malloc.c /agonc/out/malloc.i
+/bin/agonc/cc1 /agonc/out/malloc.i /agonc/out/malloc.ir -u malloc.c -Werror
+/bin/agonc/cc2 /agonc/out/malloc.ir /agonc/out/malloc.s -O
+/bin/agonc/cpp /agonc/lib/libc/stdio.c /agonc/out/stdio.i
+/bin/agonc/cc1 /agonc/out/stdio.i /agonc/out/stdio.ir -u stdio.c -Werror
+/bin/agonc/cc2 /agonc/out/stdio.ir /agonc/out/stdio.s -O
+/bin/agonc/cpp /agonc/lib/libc/stdlib.c /agonc/out/stdlib.i
+/bin/agonc/cc1 /agonc/out/stdlib.i /agonc/out/stdlib.ir -u stdlib.c -Werror
+/bin/agonc/cc2 /agonc/out/stdlib.ir /agonc/out/stdlib.s -O
+/bin/agonc/cpp /agonc/lib/libc/string.c /agonc/out/string.i
+/bin/agonc/cc1 /agonc/out/string.i /agonc/out/string.ir -u string.c -Werror
+/bin/agonc/cc2 /agonc/out/string.ir /agonc/out/string.s -O
+/bin/agonc/cpp /agonc/lib/libc/exit.c /agonc/out/exit.i
+/bin/agonc/cc1 /agonc/out/exit.i /agonc/out/exit.ir -u exit.c -Werror
+/bin/agonc/cc2 /agonc/out/exit.ir /agonc/out/exit.s -O
+/bin/agonc/cpp /agonc/lib/libc/time.c /agonc/out/time.i
+/bin/agonc/cc1 /agonc/out/time.i /agonc/out/time.ir -u time.c -Werror
+/bin/agonc/cc2 /agonc/out/time.ir /agonc/out/time.s -O
+/bin/agonc/cpp /agonc/lib/libc/fp.c /agonc/out/fp.i
+/bin/agonc/cc1 /agonc/out/fp.i /agonc/out/fp.ir -u fp.c -Werror
+/bin/agonc/cc2 /agonc/out/fp.ir /agonc/out/fp.s -O
+/bin/agonc/cpp /agonc/lib/libc/math.c /agonc/out/math.i
+/bin/agonc/cc1 /agonc/out/math.i /agonc/out/math.ir -u math.c -Werror
+/bin/agonc/cc2 /agonc/out/math.ir /agonc/out/math.s -O
+/bin/agonc/cpp /agonc/lib/libc/ll.c /agonc/out/ll.i
+/bin/agonc/cc1 /agonc/out/ll.i /agonc/out/ll.ir -u ll.c -Werror
+/bin/agonc/cc2 /agonc/out/ll.ir /agonc/out/ll.s -O
+/bin/agonc/cpp /agonc/lib/agon/mos.c /agonc/out/mos.i
+/bin/agonc/cc1 /agonc/out/mos.i /agonc/out/mos.ir -u mos.c -Werror
+/bin/agonc/cc2 /agonc/out/mos.ir /agonc/out/mos.s -O
+echo concat, which joins the library's units into /lib/libc.s and /lib/libm.s
+/bin/agonc/cpp /agonc/tools/concat.c /agonc/out/concat.i
+/bin/agonc/cc1 /agonc/out/concat.i /agonc/out/concat.ir -u concat.c -Werror
+/bin/agonc/cc2 /agonc/out/concat.ir /agonc/out/concat.s -O
+/bin/agonc/ld -o /agonc/out/concat.asm /lib/crt0.s /lib/rt.s /agonc/out/concat.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/mos.s
+ez80asm /agonc/out/concat.asm /bin/concat.bin -m
+concat /lib/libc.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/time.s /agonc/out/mos.s
+concat /lib/libm.s /agonc/out/fp.s /agonc/out/math.s /agonc/out/ll.s
+echo the libraries' indexes, which links read instead of the whole library
+/bin/agonc/ld --index /lib/crt0.s /lib/rt.s /lib/libc.s /lib/libm.s
+echo compare, which checks two files are identical
+/bin/agonc/cpp /agonc/tools/compare.c /agonc/out/compare.i
+/bin/agonc/cc1 /agonc/out/compare.i /agonc/out/compare.ir -u compare.c -Werror
+/bin/agonc/cc2 /agonc/out/compare.ir /agonc/out/compare.s -O
+/bin/agonc/ld -o /agonc/out/compare.asm /lib/crt0.s /lib/rt.s /agonc/out/compare.s /lib/libc.s
+ez80asm /agonc/out/compare.asm /bin/compare.bin -m
+echo The driver, agonc, as a moslet
+/bin/agonc/cpp /agonc/src/agonc/agonc.c /agonc/out/agonc.i
+/bin/agonc/cc1 /agonc/out/agonc.i /agonc/out/agonc.ir -u agonc.c -Werror
+/bin/agonc/cc2 /agonc/out/agonc.ir /agonc/out/agonc.s -O
+/bin/agonc/cpp /agonc/src/agonc/sys.c /agonc/out/sys.i
+/bin/agonc/cc1 /agonc/out/sys.i /agonc/out/sys.ir -u sys.c -Werror
+/bin/agonc/cc2 /agonc/out/sys.ir /agonc/out/sys.s -O
+/bin/agonc/ld -o /agonc/out/agonc.asm --moslet /lib/crt0.s /lib/rt.s /agonc/out/agonc.s /agonc/out/sys.s /lib/libc.s
+ez80asm /agonc/out/agonc.asm /mos/agonc.bin -m
+echo 1-stage1 finished. Next: exec /agonc/bootstrap/2-stage2.txt

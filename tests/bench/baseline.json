@@ -1,0 +1,42 @@
+{
+ "crc32": {
+  "time": 200,
+  "size": 12154
+ },
+ "fib": {
+  "time": 202,
+  "size": 11781
+ },
+ "fp": {
+  "time": 596,
+  "size": 33879
+ },
+ "interp": {
+  "time": 252,
+  "size": 12556
+ },
+ "list": {
+  "time": 220,
+  "size": 12466
+ },
+ "ll": {
+  "time": 372,
+  "size": 17253
+ },
+ "matmul": {
+  "time": 390,
+  "size": 13009
+ },
+ "sieve": {
+  "time": 196,
+  "size": 11779
+ },
+ "sort": {
+  "time": 384,
+  "size": 13322
+ },
+ "strops": {
+  "time": 268,
+  "size": 12385
+ }
+}

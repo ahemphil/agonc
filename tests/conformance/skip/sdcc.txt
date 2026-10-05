@@ -1,0 +1,656 @@
+# sdcc: tests skipped by the classifier (run_suite.py --update-skips).
+# Categories: C99 (a later standard), GNU_hard (a GNU extension not provided),
+# INT32 (assumes int has 32 bits), ENV (something MOS cannot do), no-checks.
+absolute.c.in no-checks
+addrspace.c no-checks
+align.c.in no-checks
+argval.c.in C99 (c99_mixed_decl_code)
+arraybounds.c C99 (c99_array_param_qual)
+asconaead128.c.in C99 INT32 (c99_header, c99_inline, c99_long_long, c99_mixed_decl_code, int32_shift_ge24, non_ascii_source)
+asconhash256.c.in C99 INT32 (c99_header, c99_inline, c99_long_long, c99_mixed_decl_code, int32_shift_ge24, non_ascii_source)
+assert.c no-checks
+ato.c C99 (c99_libfunc)
+atomic.c C99 (c99_bool, c99_header, c99_mixed_decl_code)
+auto.c no-checks
+bit_floor.c.in no-checks (tmpl_instances_dropped)
+bit_width.c.in no-checks (tmpl_instances_dropped)
+bitcount.c.in no-checks (tmpl_instances_dropped)
+bitcountleading.c.in no-checks (tmpl_instances_dropped)
+bitcounttrailing.c.in no-checks (tmpl_instances_dropped)
+bitfields-bits1.c.in C99 (c99_header)
+bitfields-bits2.c.in C99 (c99_header)
+bitfields-checks.c.in C99 (c99_header, c99_mixed_decl_code)
+bitfields-dead-loop.c.in C99 (c99_header)
+bitfields-nibbles.c.in C99 (c99_header)
+bitfields.c GNU_hard (ext_nonint_bitfield)
+bitfirst.c.in no-checks (tmpl_instances_dropped)
+bitfirstleading.c.in no-checks (tmpl_instances_dropped)
+bitint-enum.c no-checks
+bitint.c.in no-checks (c99_long_long)
+bitintarith.c.in no-checks
+bitintbitfield.c C99 no-checks (c99_header)
+bitintconst.c.in no-checks
+bitintfromfloat.c.in no-checks (float_header)
+bitintshift.c.in no-checks (c99_huge_const)
+bitinttofloat.c.in no-checks (float_header)
+bitintvararg.c.in no-checks
+bitopcse.c.in C99 (c99_header, tmpl_instances_dropped)
+bitvars.c.in C99 no-checks (c99_header, tmpl_instances_dropped)
+bitwidth.c.in no-checks (tmpl_instances_dropped)
+blake2s.c C99 INT32 (c99_header, int32_big_const, int32_shift_ge24, non_ascii_source)
+bool.c C99 GNU_hard (c99_header, ext_nonint_bitfield, float_literal)
+bug-1406131.c no-checks
+bug-1805702.c GNU_hard (float_kw, sdcc_ext)
+bug-1817005.c no-checks
+bug-1952.c C99 (c11_keyword, c99_func)
+bug-1981238.c GNU_hard no-checks (ext_nonint_bitfield)
+bug-2031.c no-checks
+bug-2041.c.in no-checks
+bug-2102.c GNU_hard (gnu_zero_length_array)
+bug-2133.c C99 (c99_header)
+bug-2188.c C99 (c99_header, c99_inline, int32_big_const)
+bug-2216.c GNU_hard (ext_nonint_bitfield)
+bug-2221.c no-checks
+bug-2222.c no-checks
+bug-2305.c GNU_hard no-checks (sdcc_ext)
+bug-2313.c C99 no-checks (c99_header)
+bug-2326.c C99 (c99_header)
+bug-2357.c no-checks
+bug-2363.c no-checks
+bug-2368.c C99 no-checks (c99_header)
+bug-2376.c GNU_hard (sdcc_ext)
+bug-2384.c no-checks
+bug-2452.c C99 (c99_header)
+bug-2516.c C99 (c99_libfunc, float_header, float_kw, float_literal)
+bug-2539.c C99 (c99_header)
+bug-2548.c no-checks
+bug-2551.c C99 (c99_header, c99_inline)
+bug-2554.c C99 (c99_header, c99_inline)
+bug-2556.c C99 no-checks (c99_header)
+bug-2558.c C99 (c99_header, c99_inline)
+bug-2559.c C99 (c99_header, c99_inline)
+bug-2567.c C99 (c99_for_decl, c99_header, c99_inline)
+bug-2568.c C99 no-checks (c99_header)
+bug-2569.c C99 no-checks (c99_header)
+bug-2580.c.in GNU_hard (sdcc_ext)
+bug-2590.c GNU_hard no-checks (sdcc_ext)
+bug-2596.c C99 (c99_inline)
+bug-2632.c C99 (c99_for_decl)
+bug-2642.c no-checks
+bug-2643.c C99 (c11_anon_member, c99_designated_init)
+bug-2645.c no-checks
+bug-2684.c INT32 (int32_sizeof_int_eq_long)
+bug-2687.c C99 (c11_keyword, c99_huge_const, c99_long_long, int32_big_const)
+bug-2708.c C99 (c99_header)
+bug-2710.c no-checks
+bug-2715.c no-checks
+bug-2746.c C99 no-checks (c99_header)
+bug-2751.c no-checks
+bug-2752.c C99 (c99_header, c99_inline)
+bug-2756.c no-checks
+bug-2764.c C99 (c99_header)
+bug-2767.c no-checks
+bug-2770.c no-checks
+bug-2771.c no-checks
+bug-2776.c C99 (c99_mixed_decl_code)
+bug-2804.c C99 (c99_bool, c99_header, c99_long_long)
+bug-2807.c C99 (c99_header)
+bug-2817.c no-checks
+bug-2820.c C99 (c99_header, float_kw, float_literal)
+bug-2822.c C99 GNU_hard (c99_header, int32_big_const, sdcc_ext)
+bug-2833.c C99 (c99_bool, float_kw, float_literal)
+bug-2834.c C99 (c99_bool, c99_designated_init)
+bug-2840.c C99 (c11_anon_member)
+bug-2842.c no-checks
+bug-2854.c C99 (c99_header)
+bug-2855.c no-checks
+bug-2859.c C99 (c99_bool)
+bug-2881.c GNU_hard (sdcc_ext)
+bug-2890326.c C99 (c99_header)
+bug-2907.c C99 (c11_keyword)
+bug-2912.c GNU_hard (float_kw, float_literal, sdcc_ext)
+bug-2931.c C99 no-checks (c99_header)
+bug-2932.c GNU_hard (sdcc_ext)
+bug-2958.c no-checks
+bug-2959.c GNU_hard no-checks (gnu_asm)
+bug-2964.c C99 (c99_long_long, c99_mixed_decl_code)
+bug-2973.c no-checks
+bug-2981.c C99 (c99_for_decl, c99_inline)
+bug-2983.c C99 (c99_mixed_decl_code)
+bug-2995.c C99 no-checks (c99_header)
+bug-3002.c C99 (c99_header, int32_big_const)
+bug-3003.c C99 (c99_for_decl, c99_header)
+bug-3013.c C99 (c99_mixed_decl_code)
+bug-3023.c no-checks
+bug-3025.c no-checks
+bug-3027.c C99 no-checks (c99_for_decl)
+bug-3034585.c no-checks
+bug-3043.c.in C99 no-checks (c99_bool, tmpl_instances_dropped)
+bug-3065.c no-checks
+bug-3066.c C99 (c99_header, c99_mixed_decl_code)
+bug-3079.c GNU_hard (sdcc_ext)
+bug-3080.c no-checks
+bug-3081.c C99 GNU_hard (c99_header, sdcc_ext)
+bug-3083.c C99 no-checks (c99_header)
+bug-3085.c C99 (c99_for_decl, c99_header)
+bug-3090.c C99 (c99_mixed_decl_code)
+bug-3093.c C99 (c99_header)
+bug-3097.c C99 (c99_designated_init)
+bug-3101.c C99 (c99_mixed_decl_code)
+bug-3102.c no-checks
+bug-3129.c C99 GNU_hard (c99_header, c99_restrict, sdcc_ext)
+bug-3132.c C99 (c99_for_decl, c99_header)
+bug-3145.c C99 (c11_keyword)
+bug-3165.c GNU_hard no-checks (sdcc_ext)
+bug-3169.c GNU_hard (sdcc_ext)
+bug-3172.c.in C99 (c99_mixed_decl_code)
+bug-3205.c no-checks
+bug-3229.c GNU_hard (c99_long_long, sdcc_ext)
+bug-3230.c GNU_hard (sdcc_ext)
+bug-3231.c GNU_hard (sdcc_ext)
+bug-3235.c GNU_hard (sdcc_ext)
+bug-3238.c GNU_hard (sdcc_ext)
+bug-3239.c GNU_hard (sdcc_ext)
+bug-3240.c GNU_hard (sdcc_ext)
+bug-3244.c C99 (c99_header)
+bug-3251.c.in no-checks
+bug-3254.c C99 (c11_keyword)
+bug-3255.c C99 no-checks (c11_keyword, c99_header)
+bug-3256.c GNU_hard (sdcc_ext)
+bug-3257.c GNU_hard (sdcc_ext)
+bug-3282.c C99 (c99_bool)
+bug-3289.c C99 no-checks (c99_mixed_decl_code)
+bug-3296.c C99 (c99_header, c99_inline)
+bug-3322.c C99 (c99_for_decl)
+bug-3372.c C99 no-checks (c11_keyword)
+bug-3379.c C99 (c99_header, c99_inline)
+bug-3387.c no-checks
+bug-3391.c C99 (c11_keyword, c99_huge_const, c99_long_long, c99_long_long_suffix)
+bug-3393-designated.c C99 (c11_anon_member, c99_designated_init)
+bug-3393.c C99 (c11_anon_member)
+bug-3401.c C99 (c99_header)
+bug-3406.c C99 GNU_hard (c99_header, c99_mixed_decl_code, sdcc_ext)
+bug-3410.c.in C99 GNU_hard (c99_designated_init, c99_header, ext_nonint_bitfield)
+bug-3455.c C99 no-checks (c99_for_decl)
+bug-3456.c C99 GNU_hard (c99_header, sdcc_ext)
+bug-3458.c.in GNU_hard (sdcc_ext)
+bug-3459.c C99 (c99_header, c99_mixed_decl_code)
+bug-3460.c.in C99 no-checks (c99_header, tmpl_instances_dropped)
+bug-3461.c C99 GNU_hard (c99_designated_init, c99_header, ext_nonint_bitfield)
+bug-3462.c no-checks
+bug-3463.c C99 GNU_hard (c99_header, ext_nonint_bitfield)
+bug-3470.c C99 (c99_header, c99_long_long)
+bug-3471.c C99 (c99_header, c99_restrict)
+bug-3478.c C99 (c99_header, enum_trailing_comma)
+bug-3481.c C99 no-checks (c99_header)
+bug-3482.c C99 no-checks (c99_header)
+bug-3487.c C99 (c99_header, c99_mixed_decl_code)
+bug-3495411.c C99 (c99_bool)
+bug-3503.c C99 no-checks (c99_header)
+bug-3522.c C99 (c99_header)
+bug-3523.c C99 (c99_header, c99_mixed_decl_code)
+bug-3547.c C99 no-checks (c99_for_decl)
+bug-3554.c.in C99 (c99_header)
+bug-3556.c C99 (c99_header)
+bug-3560.c C99 (c23_binary_const, c99_header)
+bug-3563.c C99 GNU_hard (c11_anon_member, c99_designated_init, c99_header, c99_inline, c99_mixed_decl_code, ext_nonint_bitfield)
+bug-3564.c C99 (c99_designated_init)
+bug-3567.c C99 (c99_designated_init, c99_header, c99_mixed_decl_code)
+bug-3570.c no-checks
+bug-3579.c C99 (c99_header, c99_mixed_decl_code)
+bug-3597.c no-checks
+bug-3606.c C99 no-checks (c99_header, c99_mixed_decl_code)
+bug-3607.c C99 (c99_bool, c99_header, int32_big_const)
+bug-3636.c no-checks
+bug-3639.c no-checks
+bug-3641.c C99 no-checks (c99_header)
+bug-3660.c C99 no-checks (c99_header)
+bug-3678.c no-checks
+bug-3685.c C99 (c99_for_decl, c99_header, c99_inline, c99_mixed_decl_code)
+bug-3711.c C99 GNU_hard (c99_bool, c99_long_long, sdcc_ext)
+bug-3712.c C99 GNU_hard (c99_bool, c99_huge_const, c99_long_long, int32_big_const, sdcc_ext)
+bug-3727.c C99 no-checks (c99_for_decl)
+bug-3733.c C99 no-checks (c99_header)
+bug-3741.c C99 GNU_hard no-checks (c99_for_decl, sdcc_ext)
+bug-3745.c C99 (c99_header, c99_huge_const, c99_long_long, float_literal)
+bug-3745.c.in C99 (c99_header, c99_huge_const, c99_long_long, float_literal)
+bug-3779.c C99 (c99_mixed_decl_code)
+bug-3788.c GNU_hard no-checks (ext_nonint_bitfield)
+bug-3791.c C99 no-checks (c99_header)
+bug-3795.c C99 (c99_header, float_kw)
+bug-3802.c no-checks
+bug-3814.c C99 (c99_bool)
+bug-3822.c C99 no-checks (c99_mixed_decl_code)
+bug-3824.c no-checks
+bug-3831.c C99 (c99_header)
+bug-3834.c C99 (c99_for_decl, c99_inline)
+bug-3845.c C99 (c99_header)
+bug-3850.c C99 GNU_hard (c99_header, ext_nonint_bitfield)
+bug-3894.c no-checks
+bug-3920.c C99 (c99_compound_literal, c99_inline)
+bug-3981.c C99 (c99_header)
+bug-3985.c C99 (c99_header)
+bug-3997.c C99 GNU_hard no-checks (c99_header, sdcc_ext)
+bug-3998.c C99 no-checks (c99_inline)
+bug-4007.c C99 (c99_header, c99_mixed_decl_code)
+bug-4008.c C99 (c99_for_decl, c99_header, c99_mixed_decl_code)
+bug-4013.c no-checks
+bug-4039.c C99 (c99_header, c99_inline)
+bug-4044.c GNU_hard (gnu_nested_function)
+bug-4046.c C99 no-checks (c99_header)
+bug-4047.c C99 (c99_header)
+bug-4053.c C99 GNU_hard (c99_header, ext_nonint_bitfield)
+bug-4054.c C99 no-checks (c99_header)
+bug-453196.c C99 no-checks (c99_mixed_decl_code)
+bug-460010.c no-checks
+bug-468811.c no-checks
+bug-477835.c no-checks
+bug-478094.c no-checks
+bug-485362.c.in no-checks
+bug-524209.c no-checks
+bug-524211.c no-checks
+bug-880197.c no-checks
+bug-895992.c ENV (mos_unsupported_call)
+bug-908454.c C99 (c99_header)
+bug-983491.c no-checks
+bug1198642.c no-checks
+bug1337835.c C99 (c99_header)
+bug1348008.c no-checks
+bug1409955.c C99 (c99_mixed_decl_code)
+bug1458678.c no-checks
+bug1496419.c no-checks
+bug1503067.c no-checks
+bug1509084.c C99 (c99_header)
+bug1536762.c C99 (c99_header)
+bug1546986.c C99 no-checks (c99_header)
+bug1712928.c no-checks
+bug1723128.c C99 no-checks (c99_header)
+bug1734654.c C99 no-checks (c99_header)
+bug1738367.c C99 no-checks (c99_header)
+bug1745717.c C99 no-checks (c99_header)
+bug1757671.c C99 (c99_header, float_kw, float_literal, int32_big_const)
+bug1788177.c C99 (c99_header)
+bug1838000.c GNU_hard (ext_nonint_bitfield)
+bug1839277.c no-checks
+bug1856409.c.in C99 (c99_header)
+bug1875933.c C99 (c99_header)
+bug1921073.c no-checks
+bug1938300.c C99 GNU_hard no-checks (c99_header, sdcc_ext)
+bug2435941.c C99 (c99_header, int32_big_const)
+bug2655200.c C99 (c99_header)
+bug2719592.c C99 (c99_header)
+bug2805333.c C99 no-checks (c99_header)
+bug2942247.c C99 (c99_bool)
+bug2942343.c C99 no-checks (c99_bool)
+bug3004918.c C99 (c99_header)
+bug3029630.c no-checks
+bug3037889.c no-checks
+bug3223041.c C99 (c99_header)
+bug3290691.c C99 (c99_header)
+bug3304184.c C99 no-checks (c99_header)
+bug3379723.c GNU_hard (sdcc_ext)
+bug3404101.c C99 GNU_hard no-checks (c99_header, ext_nonint_bitfield)
+bug3410878.c C99 no-checks (c99_header)
+bug3424150.c no-checks
+bug3440327.c no-checks
+bug3475990.c no-checks
+bug3531687.c C99 (c99_header)
+bug3561215.c C99 no-checks (c99_header)
+bug3564104.c C99 (c99_header)
+bug3564649.c no-checks
+bug3565757.c C99 (c99_header)
+bug663539.c no-checks
+c2xkeywords.c no-checks
+callee_saves.c no-checks
+caseranges.c no-checks
+charconst.c no-checks
+checkedint.c.in no-checks
+compound-literal.c C99 GNU_hard (c11_anon_member, c99_compound_literal, c99_mixed_decl_code, gnu_nested_function)
+cond-omit-2nd.c no-checks
+constantRange.c C99 (c99_header, int32_big_const)
+constexpr.c no-checks
+containerof.c no-checks
+coremark.c.in C99 (c99_header, c99_variadic_macro, float_kw, int32_big_const, uses_argv)
+countof.c no-checks
+critical.c C99 (c99_inline)
+cvu_play_music.c C99 no-checks (c99_header, c99_restrict)
+declafterstmt.c C99 (c99_mixed_decl_code)
+dhrystone.c C99 ENV (c99_mixed_decl_code, float_kw, float_literal, needs_stdin)
+digit_separators.c no-checks
+dilithium-ntt.c C99 INT32 (c99_for_decl, c99_header, c99_long_long, int32_big_const, int32_shift_ge24)
+div.c C99 (c99_libfunc, c99_long_long_suffix)
+dynamic.c.in GNU_hard (c99_long_long, int32_big_const, sdcc_ext)
+dynamicc.c GNU_hard (int32_big_const, sdcc_ext)
+dynamiccasmchk.c GNU_hard (int32_big_const, sdcc_ext)
+dynamiccstructret.c.in GNU_hard (int32_big_const, sdcc_ext)
+falcon-ntt.c C99 INT32 (c99_for_decl, c99_header, c99_inline, c99_long_long, int32_shift_ge24)
+far_rabbit_fields.c C99 GNU_hard (c99_header, ext_nonint_bitfield)
+far_rabbit_pointers.c C99 (c99_header)
+far_rabbits.c.in C99 (c99_mixed_decl_code, tmpl_instances_dropped)
+float_single.c.in C99 (c99_libfunc, float_header, float_kw, float_literal, float_printf)
+float_trans.c.in no-checks (float_header)
+for.c C99 (c99_for_decl)
+fptr_cast_array_init.c C99 (c99_mixed_decl_code)
+frexpf.c C99 (c99_libfunc, float_header, float_literal)
+funcptrcmp.c.in C99 (c99_header)
+funptrs.c.in C99 (c99_header, int32_big_const, tmpl_instances_dropped)
+funsigned-char.c C99 (c99_header)
+gcc-torture-execute-20000121-1.c no-checks (c99_long_long)
+gcc-torture-execute-20000402-1.c no-checks
+gcc-torture-execute-20000706-2.c no-checks
+gcc-torture-execute-20000707-1.c no-checks
+gcc-torture-execute-20000717-1.c no-checks
+gcc-torture-execute-20000722-1.c C99 (c99_compound_literal)
+gcc-torture-execute-20000801-1.c INT32 (int32_sizeof_int_4)
+gcc-torture-execute-20001011-1.c C99 (c99_func)
+gcc-torture-execute-20001024-1.c C99 (c99_restrict)
+gcc-torture-execute-20001121-1.c C99 (c99_inline, float_kw)
+gcc-torture-execute-20001130-1.c C99 (c99_inline)
+gcc-torture-execute-20001203-1.c no-checks
+gcc-torture-execute-20010123-1.c no-checks
+gcc-torture-execute-20010209-1.c no-checks
+gcc-torture-execute-20010224-1.c C99 (c99_header)
+gcc-torture-execute-20010604-1.c C99 (c99_bool, c99_header)
+gcc-torture-execute-20010924-1.c C99 (c99_flexible_array_member)
+gcc-torture-execute-20011008-3.c C99 (c99_header)
+gcc-torture-execute-20011113-1.c no-checks
+gcc-torture-execute-20011128-1.c no-checks
+gcc-torture-execute-20020118-1.c no-checks
+gcc-torture-execute-20020206-1.c no-checks
+gcc-torture-execute-20020215-1.c no-checks
+gcc-torture-execute-20020216-1.c INT32 (int32_big_const, int32_big_const_int_ctx, int32_sizeof_int_4)
+gcc-torture-execute-20020402-2.c no-checks
+gcc-torture-execute-20020413-1.c no-checks
+gcc-torture-execute-20020619-1.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-20020810-1.c no-checks
+gcc-torture-execute-20020920-1.c no-checks
+gcc-torture-execute-20021010-2.c no-checks
+gcc-torture-execute-20021118-2.c no-checks
+gcc-torture-execute-20021219-1.c no-checks
+gcc-torture-execute-20030125-1.c no-checks
+gcc-torture-execute-20030313-1.c C99 (c99_inline)
+gcc-torture-execute-20030316-1.c INT32 (int32_big_const, int32_big_const_int_ctx)
+gcc-torture-execute-20030408-1.c C99 (c99_designated_init)
+gcc-torture-execute-20030613-1.c no-checks
+gcc-torture-execute-20030714-1.c no-checks
+gcc-torture-execute-20030718-1.c C99 no-checks (c99_inline)
+gcc-torture-execute-20030914-1.c no-checks
+gcc-torture-execute-20030914-2.c no-checks
+gcc-torture-execute-20031010-1.c C99 (c99_bool)
+gcc-torture-execute-20031204-1.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-20031214-1.c no-checks (float_kw, float_literal)
+gcc-torture-execute-20031215-1.c no-checks
+gcc-torture-execute-20040208-1.c no-checks
+gcc-torture-execute-20040411-1.c no-checks
+gcc-torture-execute-20040423-1.c no-checks
+gcc-torture-execute-20040707-1.c no-checks
+gcc-torture-execute-20050106-1.c C99 (c99_inline)
+gcc-torture-execute-20050502-1.c C99 (c99_bool)
+gcc-torture-execute-20050613-1.c C99 GNU_hard (c99_designated_init, c99_flexible_array_member, gnu_zero_length_array)
+gcc-torture-execute-20051104-1.c no-checks
+gcc-torture-execute-20060930-2.c C99 (c99_inline)
+gcc-torture-execute-20071202-1.c no-checks
+gcc-torture-execute-20071210-1.c no-checks
+gcc-torture-execute-20080424-1.c C99 (c99_inline)
+gcc-torture-execute-20080506-2.c C99 (c99_restrict)
+gcc-torture-execute-20080719-1.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-20090113-1.c no-checks
+gcc-torture-execute-20090623-1.c C99 (c99_restrict)
+gcc-torture-execute-20100708-1.c no-checks (float_kw)
+gcc-torture-execute-20111208-1.c C99 (c99_header)
+gcc-torture-execute-20120111-1.c C99 (c99_header, c99_huge_const, c99_long_long, c99_long_long_suffix)
+gcc-torture-execute-20140212-2.c INT32 (int32_big_const, int32_big_const_int_ctx)
+gcc-torture-execute-20140326-1.c no-checks
+gcc-torture-execute-20141107-1.c C99 (c99_bool)
+gcc-torture-execute-20150611-1.c no-checks
+gcc-torture-execute-20170401-1.c no-checks
+gcc-torture-execute-20171008-1.c no-checks
+gcc-torture-execute-20180112-1.c C99 INT32 (c99_header, c99_mixed_decl_code, int32_big_const, int32_shift_ge24)
+gcc-torture-execute-20180131-1.c C99 (c99_designated_init)
+gcc-torture-execute-20180921-1.c no-checks
+gcc-torture-execute-20181120-1.c INT32 (dg_req_int32plus, int32_big_const, int32_dg)
+gcc-torture-execute-920501-2.c no-checks
+gcc-torture-execute-920501-6.c no-checks
+gcc-torture-execute-920501-8.c no-checks
+gcc-torture-execute-920501-9.c no-checks
+gcc-torture-execute-920721-2.c no-checks
+gcc-torture-execute-920721-3.c C99 (c99_inline)
+gcc-torture-execute-920726-1.c no-checks
+gcc-torture-execute-920908-1.c no-checks
+gcc-torture-execute-920922-1.c INT32 (int32_shift_ge24)
+gcc-torture-execute-920929-1.c no-checks
+gcc-torture-execute-921112-1.c no-checks
+gcc-torture-execute-921117-1.c no-checks
+gcc-torture-execute-930126-1.c no-checks
+gcc-torture-execute-930208-1.c no-checks
+gcc-torture-execute-930406-1.c no-checks
+gcc-torture-execute-930513-1.c no-checks
+gcc-torture-execute-930526-1.c C99 (c99_inline)
+gcc-torture-execute-930622-2.c no-checks
+gcc-torture-execute-930713-1.c no-checks
+gcc-torture-execute-931004-1.c no-checks
+gcc-torture-execute-931004-10.c no-checks
+gcc-torture-execute-931004-13.c no-checks
+gcc-torture-execute-931004-14.c no-checks
+gcc-torture-execute-931004-2.c no-checks
+gcc-torture-execute-931004-3.c no-checks
+gcc-torture-execute-931004-4.c no-checks
+gcc-torture-execute-931004-5.c no-checks
+gcc-torture-execute-931004-6.c no-checks
+gcc-torture-execute-931004-7.c no-checks
+gcc-torture-execute-931004-8.c no-checks
+gcc-torture-execute-931004-9.c no-checks
+gcc-torture-execute-931110-1.c GNU_hard no-checks (ext_nonint_bitfield)
+gcc-torture-execute-960116-1.c C99 (c99_inline, int32_big_const)
+gcc-torture-execute-960215-1.c no-checks
+gcc-torture-execute-960326-1.c C99 (c99_designated_init)
+gcc-torture-execute-960416-1.c no-checks
+gcc-torture-execute-960513-1.c no-checks
+gcc-torture-execute-960608-1.c GNU_hard (ext_nonint_bitfield)
+gcc-torture-execute-961017-1.c no-checks
+gcc-torture-execute-961017-2.c INT32 (int32_sizeof_int_4)
+gcc-torture-execute-961223-1.c C99 (c99_inline, float_kw, float_literal)
+gcc-torture-execute-980506-1.c no-checks
+gcc-torture-execute-980716-1.c no-checks
+gcc-torture-execute-991202-1.c no-checks
+gcc-torture-execute-991216-4.c no-checks
+gcc-torture-execute-anon-1.c no-checks
+gcc-torture-execute-arith-rand.c INT32 (int32_big_const, int32_sizeof_int_eq_long)
+gcc-torture-execute-ashldi-1.c INT32 (c99_long_long, int32_shift_ge24)
+gcc-torture-execute-ashrdi-1.c INT32 (c99_long_long, int32_shift_ge24)
+gcc-torture-execute-bf-layout-1.c no-checks
+gcc-torture-execute-bf-pack-1.c no-checks
+gcc-torture-execute-bf64-1.c no-checks
+gcc-torture-execute-bitfld-3.c no-checks
+gcc-torture-execute-bitfld-5.c no-checks
+gcc-torture-execute-cmpdi-1.c no-checks (c99_huge_const, c99_long_long, c99_long_long_suffix)
+gcc-torture-execute-conversion.c no-checks
+gcc-torture-execute-cvt-1.c C99 (c99_inline, float_kw)
+gcc-torture-execute-dbra-1.c no-checks
+gcc-torture-execute-float-floor.c C99 no-checks (c99_libfunc, float_kw, float_literal)
+gcc-torture-execute-inst-check.c no-checks
+gcc-torture-execute-int-compare.c no-checks
+gcc-torture-execute-loop-2c.c C99 (c99_inline, non_ascii_source)
+gcc-torture-execute-loop-9.c no-checks
+gcc-torture-execute-lshrdi-1.c INT32 (c99_long_long, int32_shift_ge24)
+gcc-torture-execute-memcpy-2.c no-checks (c99_long_long)
+gcc-torture-execute-memset-1.c no-checks (c99_long_long)
+gcc-torture-execute-memset-2.c no-checks (c99_long_long)
+gcc-torture-execute-memset-3.c no-checks (c99_long_long)
+gcc-torture-execute-mode-dependent-address.c C99 (c99_header, c99_long_long, c99_restrict, dg_req_stdint_types)
+gcc-torture-execute-p18298.c C99 (c99_header, c99_inline)
+gcc-torture-execute-packed-2.c no-checks
+gcc-torture-execute-pr15262-2.c no-checks
+gcc-torture-execute-pr15296.c C99 (c99_designated_init, c99_header, non_ascii_source)
+gcc-torture-execute-pr20601-1.c no-checks
+gcc-torture-execute-pr31169.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-pr33382.c C99 (c99_flexible_array_member)
+gcc-torture-execute-pr33779-1.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr33870-1.c C99 (c99_inline)
+gcc-torture-execute-pr33870.c C99 (c99_inline)
+gcc-torture-execute-pr37125.c C99 (c99_inline)
+gcc-torture-execute-pr37882.c GNU_hard (ext_nonint_bitfield)
+gcc-torture-execute-pr38212.c C99 (c99_restrict)
+gcc-torture-execute-pr39339.c C99 GNU_hard (c99_designated_init, ext_nonint_bitfield)
+gcc-torture-execute-pr42833.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr47148.c C99 (c99_inline, c99_mixed_decl_code)
+gcc-torture-execute-pr49073.c C99 (c99_bool)
+gcc-torture-execute-pr49768.c C99 (c99_designated_init)
+gcc-torture-execute-pr51581-1.c INT32 (dg_req_int32plus, int32_dg)
+gcc-torture-execute-pr51581-2.c INT32 (dg_req_int32plus, int32_dg)
+gcc-torture-execute-pr60454.c C99 (c99_header)
+gcc-torture-execute-pr61306-1.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr61306-2.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr63209.c INT32 (int32_big_const, int32_big_const_int_ctx)
+gcc-torture-execute-pr63302.c no-checks
+gcc-torture-execute-pr63659.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-pr63843.c C99 INT32 (c99_inline, int32_big_const, int32_sizeof_int_4)
+gcc-torture-execute-pr64682.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-pr65215-1.c C99 INT32 (c99_huge_const, c99_inline, c99_long_long, c99_long_long_suffix, c99_mixed_decl_code, int32_big_const, int32_shift_ge24, int32_sizeof_int_4)
+gcc-torture-execute-pr65215-2.c C99 INT32 (c99_huge_const, c99_inline, c99_long_long, c99_long_long_suffix, c99_mixed_decl_code, int32_big_const, int32_shift_ge24, int32_sizeof_int_4)
+gcc-torture-execute-pr66187.c no-checks
+gcc-torture-execute-pr67714.c C99 (c99_for_decl)
+gcc-torture-execute-pr68185.c no-checks
+gcc-torture-execute-pr68532.c C99 (c11_keyword, c99_for_decl)
+gcc-torture-execute-pr68841.c C99 (c99_inline)
+gcc-torture-execute-pr69097-1.c no-checks
+gcc-torture-execute-pr69320-1.c no-checks
+gcc-torture-execute-pr71335.c no-checks
+gcc-torture-execute-pr71700.c no-checks
+gcc-torture-execute-pr77766.c no-checks
+gcc-torture-execute-pr77767.c no-checks
+gcc-torture-execute-pr78559.c C99 (c99_for_decl)
+gcc-torture-execute-pr78856.c no-checks
+gcc-torture-execute-pr79121.c C99 (c99_header, c99_huge_const, c99_long_long, int32_big_const)
+gcc-torture-execute-pr79286.c no-checks
+gcc-torture-execute-pr81503.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr81555.c C99 (c99_bool)
+gcc-torture-execute-pr81556.c C99 (c99_bool, c99_huge_const, c99_long_long, c99_long_long_suffix)
+gcc-torture-execute-pr81913.c C99 (c99_header, int32_big_const)
+gcc-torture-execute-pr82387.c no-checks
+gcc-torture-execute-pr82388.c no-checks
+gcc-torture-execute-pr83362.c C99 (c99_header)
+gcc-torture-execute-pr85529-2.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-pr85582-1.c C99 no-checks (c99_long_long, c99_mixed_decl_code)
+gcc-torture-execute-pr85582-2.c C99 (c99_long_long, c99_mixed_decl_code)
+gcc-torture-execute-pr85582-3.c C99 (c99_long_long, c99_mixed_decl_code)
+gcc-torture-execute-pr87053.c no-checks
+gcc-torture-execute-pr91137.c C99 (c99_for_decl, c99_long_long, int32_big_const)
+gcc-torture-execute-regstack-1.c no-checks
+gcc-torture-execute-restrict-1.c no-checks
+gcc-torture-execute-ssad-run.c C99 (c99_for_decl)
+gcc-torture-execute-stdarg-2.c no-checks (float_kw)
+gcc-torture-execute-stdarg-5.c.in C99 (c99_inline, float_kw, float_literal)
+gcc-torture-execute-strlen-2.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-strlen-4.c C99 (c99_mixed_decl_code)
+gcc-torture-execute-struct-ini-1.c no-checks
+gcc-torture-execute-struct-ini-4.c C99 (c99_designated_init)
+gcc-torture-execute-tstdi-1.c no-checks
+gcc-torture-execute-unroll-1.c C99 (c99_inline)
+gcc-torture-execute-usad-run.c C99 (c99_for_decl)
+gcc-torture-execute-va-arg-10.c C99 (c99_libfunc)
+gcc-torture-execute-va-arg-14.c C99 (c99_libfunc)
+gcc-torture-execute-vla-dealloc-1.c no-checks (dg_req_alloca)
+gcc-torture-execute-wchar_t-1.c C99 (c95_header, non_ascii_source)
+gcrypt-serpent.c.in C99 INT32 (c99_array_param_qual, c99_header, c99_inline, int32_big_const, int32_shift_ge24)
+generic.c no-checks
+genericintrinsicnaddr.c no-checks
+genericnonintrinsicnaddr.c no-checks
+getbyte.c.in C99 (c99_header, int32_big_const)
+idf_ucn_utf8.c no-checks (non_ascii_source)
+if-decl.c no-checks
+implicit_int.c no-checks
+inline.c C99 (c99_inline)
+io.c C99 (c99_header)
+iobit.c.in C99 no-checks (c99_header)
+iso-8859-1.c no-checks (non_ascii_source)
+iso646.c.in C99 (c95_header, float_header)
+itoa.c.in no-checks
+kyber-ntt.c C99 INT32 (c99_for_decl, c99_header, int32_shift_ge24)
+largeoddstruct.c.in no-checks
+libmullong.c.in no-checks
+literalop.c.in INT32 (int16_sizeof_int_2, int32_big_const, int32_big_const_int_ctx)
+load8.c.in C99 no-checks (c99_header)
+logical_ops.c.in C99 (c99_header, c99_huge_const, c99_long_long_suffix, tmpl_instances_dropped)
+lonesha256.c C99 INT32 (c99_header, c99_long_long, int32_shift_ge24)
+longlong.c.in INT32 (c99_huge_const, c99_long_long, c99_long_long_suffix, int32_shift_ge24)
+loop.c.in C99 (c99_for_decl)
+ltoa.c.in no-checks
+malloc.c C99 (c99_header)
+memalignment.c.in no-checks (tmpl_instances_dropped)
+memreverse8.c no-checks
+mm-pnvi-ae-udi-pointer_arith_algebraic_properties_2_global.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_arith_algebraic_properties_3_global.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_copy_user_ctrlflow_bitwise.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-pointer_from_int_disambiguation_1.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_from_int_disambiguation_1_xy.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_from_int_disambiguation_2.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_from_int_disambiguation_2_xy.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_from_integer_2g.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_offset_from_int_subtraction_auto_xy.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_offset_from_int_subtraction_auto_yx.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_offset_from_int_subtraction_global_xy.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_offset_from_int_subtraction_global_yx.c C99 (c99_header)
+mm-pnvi-ae-udi-pointer_offset_xor_auto.c C99 (c99_bool, c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-pointer_offset_xor_global.c C99 (c99_bool, c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_basic_using_uintptr_t_auto_xy.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_basic_using_uintptr_t_auto_yx.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_basic_using_uintptr_t_global_xy.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_basic_using_uintptr_t_global_yx.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_roundtrip_via_intptr_t.c C99 (c99_header)
+mm-pnvi-ae-udi-provenance_roundtrip_via_intptr_t_onepast.c C99 (c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_tag_bits_via_repr_byte_1.c C99 (c11_keyword, c99_bool, c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_tag_bits_via_uintptr_t_1.c C99 (c11_keyword, c99_bool, c99_header, c99_mixed_decl_code)
+mm-pnvi-ae-udi-provenance_union_punning_3_global.c C99 (c99_header, c99_mixed_decl_code)
+new_wide.c no-checks (non_ascii_source)
+octal.c no-checks
+offsetof.c C99 (c99_header)
+optional-static.c C99 (c99_header)
+p99-conformance.c C99 (c99_array_param_qual, c99_bool, c99_compound_literal, c99_designated_init, c99_flexible_array_member, c99_for_decl, c99_func, c99_hex_float, c99_huge_const, c99_inline, c99_long_long, c99_long_long_suffix, c99_mixed_decl_code, c99_pragma_op, c99_restrict, c99_ucn, c99_variadic_macro, c99_vla, enum_trailing_comma, float_kw, float_literal, non_ascii_source)
+packcast.c no-checks
+patch-466.c C99 (c99_header)
+preserves_regs.c.in no-checks
+push_pop_sp.c no-checks
+qualifier-preserving.c no-checks
+rabbit.c C99 INT32 (c99_header, c99_inline, int32_big_const, int32_shift_ge24)
+rotate.c.in C99 (c99_header)
+rotate2.c.in C99 (c99_header)
+rotate_left.c.in no-checks (tmpl_instances_dropped)
+rotate_right.c.in no-checks (tmpl_instances_dropped)
+serpent.c.in C99 INT32 (c99_header, c99_mixed_decl_code, int32_big_const, int32_shift_ge24)
+sfr16.c no-checks
+sha3-256.c C99 (c99_for_decl, c99_header, c99_huge_const, c99_long_long, gnu_predef_macro, int32_big_const)
+shifts.c.in INT32 (int32_shift_ge24)
+shifts2.c.in C99 (c99_header)
+simplefloat.c C99 (c99_libfunc, float_header, float_kw, float_literal)
+single_bit.c.in no-checks (tmpl_instances_dropped)
+size_t_suffix.c no-checks
+sizeof.c.in C99 (c99_header)
+smallc.c GNU_hard (sdcc_ext)
+smallserpent.c.in C99 INT32 (c99_for_decl, c99_header, int32_big_const, int32_shift_ge24)
+stack-restore.c.in C99 (c99_header)
+stacks.c.in no-checks
+stm8-conventions.c.in no-checks
+store8.c.in C99 no-checks (c99_header, c99_long_long_suffix)
+strnlen.c no-checks
+strsep.c no-checks
+structflexarray.c C99 (c99_flexible_array_member)
+structinit.c.in C99 (c99_mixed_decl_code)
+swap_add.c C99 (c99_header)
+tinyaes.c.in C99 (c99_header, non_ascii_source)
+typed-enum.c no-checks
+typeof.c no-checks
+typeof_retfptr.c no-checks
+uabs.c C99 no-checks (c99_header)
+undefinedc23.c C99 no-checks (c99_bool, c99_header, c99_mixed_decl_code, c99_vla)
+unreachable.c no-checks
+using.c.in no-checks
+vaargs-c23.c.in no-checks
+vaargs.c.in C99 (c99_libfunc)
+version.c no-checks
+wchar.c.in no-checks
+wcsnlen.c C99 no-checks (c95_header)
+wcsto.c C99 (c95_header)
+widebitintbitfield.c.in C99 no-checks (c99_header)
+z88dk.c GNU_hard (sdcc_ext)
+z88dk_callee.c GNU_hard (sdcc_ext)

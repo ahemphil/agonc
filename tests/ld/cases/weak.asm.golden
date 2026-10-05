@@ -1,0 +1,26 @@
+	assume adl=1
+	org 0x040000
+	jp $+0x45
+	align 64
+	db "MOS",0,1
+__bss_size:	equ 0
+__bss_base:	equ 0x0B0000-__bss_size
+__stack_top:	equ __bss_base
+_opt:	equ 0
+_nowhere:	equ 0
+__start:
+        ld      sp, __stack_top
+        call    _main
+        ret
+_both:
+        ret
+_user:
+        call    _both
+        ret
+_main:
+        ld      hl, _opt
+        ld      hl, _both
+        ld      hl, _nowhere
+        call    _user
+        ret
+__image_end:

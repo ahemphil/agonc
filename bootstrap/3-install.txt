@@ -1,0 +1,13 @@
+cd /agonc
+echo 3-install: stage 2 replaces stage 1 in /bin/agonc and /mos
+delete /bin/agonc/cpp.bin
+copy s2/cpp.bin /bin/agonc/cpp.bin
+delete /bin/agonc/cc1.bin
+copy s2/cc1.bin /bin/agonc/cc1.bin
+delete /bin/agonc/cc2.bin
+copy s2/cc2.bin /bin/agonc/cc2.bin
+delete /bin/agonc/ld.bin
+copy s2/ld.bin /bin/agonc/ld.bin
+delete /mos/agonc.bin
+copy s2/agonc.bin /mos/agonc.bin
+echo 3-install finished. Next: exec /agonc/bootstrap/4-stage3.txt

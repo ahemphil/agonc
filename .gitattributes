@@ -1,0 +1,3 @@
+# MOS reads its scripts and response files line by line; keep them CRLF.
+bootstrap/*.txt eol=crlf
+bootstrap/*.rsp eol=crlf

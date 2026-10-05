@@ -1,0 +1,3 @@
+# SDCC regression tests: tests skipped by hand, each with its reason.
+gcc-torture-execute-20021120-1.c LIMIT (one function beyond cc2's 4,000 instructions; GCC itself skips it on small targets as memory tight)
+bug-223113.c UB (defines the library's puts, which C89 leaves undefined; ld reports the duplicate)

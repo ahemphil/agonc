@@ -1,0 +1,5 @@
+# c-testsuite: tests skipped by hand, each with its reason.
+00206.c GNU_hard (#pragma push_macro/pop_macro, which the classifier does not detect)
+00212.c GNU_hard (expects gcc's __LP64__/__LLP64__/__ILP32__ data-model macros; no such model fits a 24-bit int)
+00178.c INT32 (prints sizeof(int) and expects 4; the classifier does not detect it)
+00211.c invalid (0x1E+1 is one preprocessing number, an invalid constant; GCC rejects it too)

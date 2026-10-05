@@ -1,0 +1,33 @@
+IR 2
+U count.c 1337
+G .total 3 s
+F add g 1 3 -
+# i = 0
+LA -3
+C 0
+ST 3
+DROP
+L 1
+# i < n ?
+LA -3
+LD 3 s
+LA 6
+LD 3 s
+LTS
+JF 3
+# total += i
+A .total
+LA -3
+LD 3 s
+ASG ADD 3 s
+DROP
+# i++
+LA -3
+INCPOST 3 s 1
+DROP
+J 1
+L 3
+A .total
+LD 3 s
+RET
+E

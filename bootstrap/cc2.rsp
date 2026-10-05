@@ -1,0 +1,10 @@
+-O
+-Werror
+-I src/common
+src/cc2/cc2.c
+src/common/args.c
+src/common/int24.c
+src/common/int32.c
+src/common/int64.c
+src/common/io.c
+src/common/rd.c
