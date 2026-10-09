@@ -183,8 +183,10 @@ void *calloc(unsigned int nmemb, unsigned int size)
         nmemb = 1;
         size = 1;
     }
-    if (nmemb > MAX_REQUEST / size)
+    if (nmemb > MAX_REQUEST / size) {
+        errno = ENOMEM;
         return NULL;
+    }
     total = nmemb * size;
     p = malloc(total);
     if (p != NULL)
@@ -209,8 +211,10 @@ void *realloc(void *ptr, unsigned int newsize)
         free(ptr);
         return NULL;
     }
-    if (newsize > MAX_REQUEST)
+    if (newsize > MAX_REQUEST) {
+        errno = ENOMEM;
         return NULL;
+    }
     b = (struct block *)((char *)ptr - HDR);
     if (newsize <= b->size) {
         /* shrink in place; a tail big enough for a block is given back */

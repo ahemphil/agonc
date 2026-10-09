@@ -6,7 +6,7 @@
  * a .s file; then ld links the .s files with the runtime and libraries
  * into one .asm, which ez80asm assembles (an .asm input goes straight to
  * the assembler). -E, -c and -S stop earlier. Intermediate files go in
- * /tmp and are removed afterwards unless -save-temps. The status is 0, or
+ * /tmp/agonc and are removed afterwards unless -save-temps. The status is 0, or
  * 200 after the first failure (130 after Ctrl-C); each pass prints its own
  * diagnostics.
  *
@@ -24,8 +24,8 @@
  * string in cmd, one word at a time; run() passes it to sys_run(). A pass
  * on the Agon is a program whose start-up code splits that string into
  * argv, and the stage-1 passes, built with AgDev, keep only 14 words (see
- * DIRECT_ARGS): a longer string is written to /tmp/<pass>.rsp and the
- * pass gets "@/tmp/<pass>.rsp" instead, which every pass expands
+ * DIRECT_ARGS): a longer string is written to /tmp/agonc/<pass>.rsp and
+ * the pass gets "@/tmp/agonc/<pass>.rsp" instead, which every pass expands
  * (common/args.c). driver.md section 5.
  *
  * Failure: a pass reports its own errors and returns non-zero; run()
@@ -34,7 +34,7 @@
  * instead), so link_all() removes the binary before assembling and treats
  * a missing binary afterwards as the failure.
  *
- * Temporary files are named in /tmp from the input's base name (<base>.i,
+ * Temporary files are named in /tmp/agonc from the input's base name (<base>.i,
  * <base>.ir, <base>.s, <out>.asm, <pass>.rsp) and recorded by temp() for
  * removal; that is why two inputs with one file name are refused.
  *
@@ -46,7 +46,7 @@
 #include <string.h>
 #include "sys.h"
 
-#define VERSION "agonc 1.1.0-beta.1 (Agon C, language C89)\n"
+#define VERSION "agonc 1.1.0-beta.2 (Agon C, language C99; C89 with -ansi)\n"
 
 #define MAX_ARGS 96             /* after @file expansion */
 #define ARG_TEXT 2048           /* the arguments' text, all together */
@@ -91,7 +91,7 @@ static int preprocess_only;
 static int compile_only;
 static int no_warnings;
 static int werror;
-static int strict;              /* -ansi, -std=c89, -std=c90 */
+static int strict;              /* -ansi, -std=c89, -std=c90; -std=c99, -std=gnu99 clear it */
 static int optimize = 1;        /* -O (the default), -O1 .. -O3, -Os; -O0 turns it off (the last one counts) */
 static int nostdlib;
 static int save_temps;
@@ -104,7 +104,7 @@ static int help;
 static char root[PATH_SIZE];    /* sys_root(): "" on the Agon */
 static char date_now[12];       /* for cpp's __DATE__ and __TIME__ (sys_date) */
 static char time_now[12];
-static char tmp_dir[PATH_SIZE]; /* root + "/tmp/" */
+static char tmp_dir[PATH_SIZE]; /* root + "/tmp/agonc/" */
 /* the argument string for the next pass: its length and word count, which
  * run() compares with DIRECT_LEN and DIRECT_ARGS */
 static char cmd[CMD_SIZE + 1];
@@ -210,7 +210,7 @@ static char *join(char *dst, char *a, char *b, int cut, char *c)
 
     nb = cut ? ext_part(b) - b : strlen(b);
     if (strlen(a) + nb + strlen(c) >= PATH_SIZE) {
-        error("path too long: ", b);
+        error("path too long: ", *b ? b : a);   /* b is "" when the root itself is too long */
         return NULL;
     }
     strcpy(dst, a);
@@ -225,9 +225,13 @@ static char *temp(char *a, char *b, int cut, char *c)
 {
     char buf[PATH_SIZE];
     char *t;
+    int i;
 
     if (join(buf, a, b, cut, c) == NULL)
         return NULL;
+    for (i = 0; i < ntemps; i++)        /* a response file is made again for each pass that needs one */
+        if (strcmp(temps[i], buf) == 0)
+            return temps[i];
     if (ntemps >= MAX_TEMPS || temp_used + strlen(buf) + 1 > TEMP_TEXT) {
         error("too many temporary files", "");
         return NULL;
@@ -241,7 +245,7 @@ static char *temp(char *a, char *b, int cut, char *c)
 }
 
 /* Do two file names agree up to their first '.', letters in either case?
- * Two such inputs would share /tmp/<base>.i, .ir and .s (FAT ignores
+ * Two such inputs would share /tmp/agonc/<base>.i, .ir and .s (FAT ignores
  * case), and two of exactly one name would give cc1 one unit name, so
  * one unit id. */
 static int same_name(char *a, char *b)
@@ -430,6 +434,8 @@ static void parse(void)
             werror = 1;
         } else if (strcmp(a, "-ansi") == 0 || strcmp(a, "-std=c89") == 0 || strcmp(a, "-std=c90") == 0) {
             strict = 1;
+        } else if (strcmp(a, "-std=c99") == 0 || strcmp(a, "-std=gnu99") == 0) {
+            strict = 0;     /* the default mode; the last -std or -ansi wins, as in gcc */
         } else if (strcmp(a, "-nostdlib") == 0) {
             nostdlib = 1;
         } else if (strcmp(a, "--index") == 0) {
@@ -530,7 +536,7 @@ static void show_time(char *name, unsigned cs)
 }
 
 /* Runs the pass (NULL: the assembler) on cmd; 1 if it succeeded. A long
- * argument string goes through /tmp/<pass>.rsp (driver.md section 5).
+ * argument string goes through /tmp/agonc/<pass>.rsp (driver.md section 5).
  * The pass's status decides: 0 is success; anything else (200 from a
  * pass that reported errors, -1 if it could not be run at all) sets
  * failed. After Ctrl-C the output the program was writing (`writing`,
@@ -608,7 +614,7 @@ static void add_warning_opts(void)
  *     cc1 <in.i> <out.ir> -u <unit name> [-ansi -w -Werror]
  *     cc2 <in.ir> <out.s> [-O]
  *
- * The .i, .ir and (for a link) .s are temporary files in /tmp; with -E
+ * The .i, .ir and (for a link) .s are temporary files in /tmp/agonc; with -E
  * and -o the .i is the output, and with -c or -S the .s is (-o's, or the
  * input's name with .s beside it). s_path[n] records the .s for
  * link_all(). The unit name is the input's file name with its extension;
@@ -647,9 +653,9 @@ static void compile(int n)
             cmd_add("-time", "");
             cmd_add(time_now, "");
         }
-        if (root[0]) {                  /* cpp's own /usrlib and /lib are the Agon's */
+        if (root[0]) {                  /* cpp's own /usrlib and /lib/agonc are the Agon's */
             cmd_add("-I", strcat(strcpy(buf, root), "/usrlib"));
-            cmd_add("-I", strcat(strcpy(buf, root), "/lib"));
+            cmd_add("-I", strcat(strcpy(buf, root), "/lib/agonc"));
         }
         add_warning_opts();
         writing = preprocess_only ? out_path : NULL;
@@ -692,7 +698,7 @@ static void compile(int n)
 }
 
 /* The first place -lname's libname.s is found: -L directories, then
- * /usrlib, /lib/agon and /lib. */
+ * /usrlib, /lib/agonc/agon and /lib/agonc. */
 static void add_library(char *name)
 {
     char file[PATH_SIZE];
@@ -712,7 +718,7 @@ static void add_library(char *name)
             sep = d[0] && (d[strlen(d) - 1] == '/' || d[strlen(d) - 1] == '\\') ? "" : "/";
             d = join(dir, d, sep, 0, "");
         } else {
-            d = join(dir, root, i == nopts ? "/usrlib/" : i == nopts + 1 ? "/lib/agon/" : "/lib/", 0, "");
+            d = join(dir, root, i == nopts ? "/usrlib/" : i == nopts + 1 ? "/lib/agonc/agon/" : "/lib/agonc/", 0, "");
         }
         if (d == NULL || join(path, d, file, 0, "") == NULL)
             return;
@@ -894,8 +900,8 @@ static void link_all(void)
             cmd_add("-v", "");
         add_ld_opts();
         if (!nostdlib) {
-            cmd_add(root, "/lib/crt0.s");
-            cmd_add(root, "/lib/rt.s");
+            cmd_add(root, "/lib/agonc/crt0.s");
+            cmd_add(root, "/lib/agonc/rt.s");
         }
         for (i = 0; i < ninputs; i++)
             cmd_add(s_path[i], "");
@@ -903,13 +909,13 @@ static void link_all(void)
             if (opt_kind[i] == 'l')
                 add_library(opt_val[i]);
         if (!nostdlib)
-            cmd_add(root, "/lib/libc.s");
+            cmd_add(root, "/lib/agonc/libc.s");
         if (!nostdlib && uses_fp())
-            cmd_add(root, "/lib/libm.s");
+            cmd_add(root, "/lib/agonc/libm.s");
         if (!nostdlib) {
             /* the MOS and VDU interface: read only if the program uses it */
             cmd_add("--if-needed", "");
-            cmd_add(root, "/lib/libagon.s");
+            cmd_add(root, "/lib/agonc/libagon.s");
         }
         if (!run("ld"))
             return;
@@ -975,7 +981,7 @@ static void index_all(void)
 }
 
 /* Checks every input first (kind, existence, clashing names), so nothing
- * runs if one is wrong; then --index, or the output check, /tmp, each
+ * runs if one is wrong; then --index, or the output check, /tmp/agonc, each
  * input's compile and the link. n counts the inputs that are compiled. */
 static void build(void)
 {
@@ -1007,7 +1013,11 @@ static void build(void)
         error("-o with -E, -c or -S needs a single input", "");
     if (out_path != NULL)
         check_output();
+    /* /tmp/agonc, and /tmp first if need be: MOS makes one folder at a time */
     if (failed || join(dir, root, "/tmp", 0, "") == NULL)
+        return;
+    sys_mkdir(dir);
+    if (join(dir, root, "/tmp/agonc", 0, "") == NULL)
         return;
     sys_mkdir(dir);
     for (i = 0; i < ninputs && !failed; i++) {
@@ -1035,10 +1045,11 @@ static void show_help(void)
     sys_out("  -L dir       add a library directory\n");
     sys_out("  -lname       link libname.s\n");
     sys_out("  -ansi        strict C89 (also -std=c89, -std=c90)\n");
+    sys_out("  -std=c99     the default mode (also -std=gnu99)\n");
     sys_out("  -w           no warnings; -Werror makes them errors\n");
     sys_out("  -O0          no peephole pass (-O, the default, has it)\n");
     sys_out("  -nostdlib    no startup code and no C library\n");
-    sys_out("  -save-temps  keep the intermediate files in /tmp\n");
+    sys_out("  -save-temps  keep the intermediate files in /tmp/agonc\n");
     sys_out("  -Wl,--entry=sym  keep sym, and what it uses, in the link\n");
     sys_out("  --index lib.s  index a library: links using it are faster\n");
     sys_out("  -time        show each pass's time and the total\n");
@@ -1076,7 +1087,7 @@ int main(int argc, char **argv)
         error("no input files", " (agonc -h lists the options)");
         return 200;
     }
-    if (join(root, sys_root(), "", 0, "") == NULL || join(tmp_dir, root, "/tmp/", 0, "") == NULL)
+    if (join(root, sys_root(), "", 0, "") == NULL || join(tmp_dir, root, "/tmp/agonc/", 0, "") == NULL)
         return 200;
     start = sys_clock();
     sys_date(date_now, time_now);

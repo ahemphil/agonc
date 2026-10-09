@@ -10,16 +10,10 @@
         db      "MOS", 0, 1
 
 __bss_base:      equ     0x0AFF00
-__idivu_buf:     equ     __bss_base+0
-__iremu_buf:     equ     __bss_base+6
-__idivs_neg:     equ     __bss_base+12
-__irems_neg:     equ     __bss_base+13
 __ishru_buf:     equ     __bss_base+14
 __ishrs_buf:     equ     __bss_base+17
 __sext8_buf:     equ     __bss_base+20
 __sext16_buf:    equ     __bss_base+23
-__imul_buf:      equ     __bss_base+26
-__imul_res:      equ     __bss_base+32
 
 BIG:             equ     0x060000
 

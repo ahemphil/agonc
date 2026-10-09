@@ -53,6 +53,8 @@ void test_file(void)
     check_str(line, "line one\n");          /* the newline is kept */
     check(fgets(line, 6, f) == line, 1);
     check_str(line, "line ");               /* n - 1 characters */
+    check(fgets(line, 1, f) == line, 1);    /* n == 1: nothing read, an empty string */
+    check_str(line, "");
     check(fgets(line, 128, f) == line, 1);
     check_str(line, "two\n");
     check(fgets(line, 128, f) == NULL, 1);  /* end of file */

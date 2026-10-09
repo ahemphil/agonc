@@ -20,14 +20,22 @@ its folders with the ones already there. It adds:
 | `/mos/agonc.bin` | the `agonc` command |
 | `/bin/agonc/` | the compiler's passes: `cpp.bin`, `cc1.bin`, `cc2.bin`, `ld.bin` |
 | `/bin/ez80asm.bin` | the assembler agonc was tested with |
-| `/lib/` | the C headers and libraries |
-| `/lib/agon/` | the Agon headers: `mos.h`, `uart.h`, `vdp.h` |
+| `/lib/agonc/` | the C headers and libraries |
+| `/lib/agonc/agon/` | the Agon headers: `mos.h`, `uart.h`, `vdp.h` |
 | `/usrlib/` | an empty folder for your own libraries |
-| `/tmp/` | the compiler's scratch folder |
+| `/tmp/` | an empty folder for temporary files (agonc's own go in `/tmp/agonc`) |
 
 If the card already has an `ez80asm.bin`, the zip's copy replaces it; agonc
 needs ez80asm 2.3 or later. Nothing else on the card is touched. To remove
 agonc, delete the files above.
+
+**Upgrading from 1.1.0-beta.1,** which kept its library directly in
+`/lib`: after unzipping, delete `/lib`'s `assert.h`, `ctype.h`, `errno.h`, `float.h`, `limits.h`, `locale.h`,
+`math.h`, `setjmp.h`, `signal.h`, `stdarg.h`, `stddef.h`, `stdint.h`,
+`stdio.h`, `stdlib.h`, `string.h`, `time.h`, `crt0.s`, `rt.s`, `libc.s`,
+`libm.s`, `libagon.s` and the `.idx` files beside them, and the folder
+`/lib/agon`. agonc no longer
+uses them.
 
 Put the card back and type `agonc --version` at the MOS prompt. It prints
 the version; `Invalid command` means `/mos/agonc.bin` is not where MOS looks

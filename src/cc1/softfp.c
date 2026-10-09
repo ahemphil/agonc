@@ -3514,6 +3514,275 @@ unsigned long sf32_from_decimal(int sign, const char *digits, int n, long exp10)
     return ((unsigned long)sign << 31) | (unsigned long)ex << 23 | frac.lo;
 }
 
+#if SOFTFP_FMA
+/* ---- fma (math99.c's, with SOFTFP_FMA) ------------------------------------------------------------- */
+
+/* x y + z with one rounding (C99 7.12.13.1). The exact product of two
+ * 53-bit significands has 106 bits, more than softfp's operations keep,
+ * so this works on a 256-bit integer of sixteen 16-bit digits (low
+ * first), slowly but simply, in C (fma is rare):
+ *   1. the special cases: a NaN, an infinity, a zero product (+-0 + z is
+ *      sf64_add's to get the zero's sign right);
+ *   2. the product exactly, at digit 4, so that 64 bits lie below it: its
+ *      value is the integer times 2^e, e = (x's exponent - 1075) + (y's)
+ *      - 64;
+ *   3. z's significand placed at bit k = (z's exponent - 1075) - e, its
+ *      bits below bit 0 jammed into bit 0 (the sticky bit); if z lies so
+ *      far above that the product is below an eighth of z's last place,
+ *      z is the answer;
+ *   4. the magnitudes added, or the smaller taken from the larger, the
+ *      sign the larger's (an exact zero is +0);
+ *   5. the top 63 bits from the leading 1 down, the rest jammed, rounded
+ *      by round_pack, which also makes subnormals and infinities. */
+#define FMA_D 16
+
+/* digit i of a significand m (53 bits as a struct u64) */
+static unsigned long fma_digit(const struct u64 *m, int i)
+{
+    return (i < 2 ? m->lo >> (16 * i) : m->hi >> (16 * (i - 2))) & 0xFFFF;
+}
+
+static int fma_bit(const unsigned long *n, int b)
+{
+    return (int)(n[b >> 4] >> (b & 15) & 1);
+}
+
+static void fma_set(unsigned long *n, int b)
+{
+    n[b >> 4] = n[b >> 4] | (1UL << (b & 15));
+}
+
+/* a significand (53 bits) and its exponent: x = m 2^e */
+static void fma_unpack(const struct sf64 *x, struct u64 *m, int *e)
+{
+    int f;
+
+    frac64(m, x);
+    f = EXP64(x);
+    if (f == 0) {
+        f = 1;                                  /* subnormal: no implicit 1 */
+    } else {
+        m->hi = m->hi | 0x100000UL;
+    }
+    *e = f - 1075;
+}
+
+/* a = a + b, or (sub, a >= b) a = a - b */
+static void fma_addsub(unsigned long *a, const unsigned long *b, int sub)
+{
+    int i;
+    unsigned long t;
+    unsigned long c;
+
+    c = 0;
+    for (i = 0; i < FMA_D; i++) {
+        if (sub) {
+            t = a[i] + 0x10000UL - b[i] - c;
+            c = t < 0x10000UL;
+        } else {
+            t = a[i] + b[i] + c;
+            c = t >> 16;
+        }
+        a[i] = t & 0xFFFF;
+    }
+}
+
+/* -1, 0 or 1 as a < b, a == b, a > b */
+static int fma_cmp(const unsigned long *a, const unsigned long *b)
+{
+    int i;
+
+    for (i = FMA_D - 1; i >= 0; i--)
+        if (a[i] != b[i])
+            return a[i] < b[i] ? -1 : 1;
+    return 0;
+}
+
+void sf64_fma(struct sf64 *r, const struct sf64 *x, const struct sf64 *y, const struct sf64 *z)
+{
+    unsigned long p[FMA_D];
+    unsigned long q[FMA_D];
+    unsigned long t;
+    unsigned long c;
+    struct u64 mx;
+    struct u64 my;
+    struct u64 mz;
+    struct u64 sig;
+    struct sf64 zero;
+    int ex;
+    int ey;
+    int ez;
+    int e;
+    int k;
+    int i;
+    int j;
+    int b;
+    int sp;
+    int sz;
+    int sign;
+    int lead;
+    int sticky;
+
+    sp = SIGN64(x) ^ SIGN64(y);
+    sz = SIGN64(z);
+    /* 1: NaNs, infinities, a zero product */
+    if (is_nan64(x) || is_nan64(y)) {
+        propagate_nan(r, x, y);
+        return;
+    }
+    if (EXP64(x) == 0x7FF || EXP64(y) == 0x7FF) {
+        if ((EXP64(x) == 0 && (x->hi & 0xFFFFFUL) == 0 && x->lo == 0)
+            || (EXP64(y) == 0 && (y->hi & 0xFFFFFUL) == 0 && y->lo == 0)) {
+            default_nan(r);                     /* inf * 0 */
+            return;
+        }
+        if (is_nan64(z)) {
+            propagate_nan(r, z, (const struct sf64 *)0);
+            return;
+        }
+        if (EXP64(z) == 0x7FF && sz != sp) {
+            default_nan(r);                     /* inf - inf */
+            return;
+        }
+        pack_special(r, sp, 0x7FF);
+        return;
+    }
+    if (EXP64(z) == 0x7FF) {
+        if (is_nan64(z))
+            propagate_nan(r, z, (const struct sf64 *)0);
+        else
+            *r = *z;
+        return;
+    }
+    fma_unpack(x, &mx, &ex);
+    fma_unpack(y, &my, &ey);
+    fma_unpack(z, &mz, &ez);
+    if (u64_zero(&mx) || u64_zero(&my)) {
+        pack_special(&zero, sp, 0);
+        sf64_add(r, &zero, z);
+        return;
+    }
+    /* 2: the product, exactly, from digit 4 */
+    for (i = 0; i < FMA_D; i++) {
+        p[i] = 0;
+        q[i] = 0;
+    }
+    for (i = 0; i < 4; i++) {
+        c = 0;
+        for (j = 0; j < 4; j++) {
+            t = p[i + j + 4] + fma_digit(&mx, i) * fma_digit(&my, j) + c;
+            p[i + j + 4] = t & 0xFFFF;
+            c = t >> 16;
+        }
+        p[i + 8] = c;
+    }
+    e = ex + ey - 64;
+    /* 3: z beside it */
+    k = ez - e;
+    if (k > 203) {
+        *r = *z;                                /* the product is below z's last place / 8 */
+        return;
+    }
+    sticky = 0;
+    for (b = 0; b < 53; b++) {
+        if (b < 32 ? (mz.lo >> b & 1) : (mz.hi >> (b - 32) & 1)) {
+            if (b + k >= 0)
+                fma_set(q, b + k);
+            else
+                sticky = 1;
+        }
+    }
+    if (sticky)
+        fma_set(q, 0);                          /* jammed */
+    /* 4: add or subtract the magnitudes */
+    sign = sp;
+    if (sp == sz) {
+        fma_addsub(p, q, 0);
+    } else {
+        i = fma_cmp(p, q);
+        if (i == 0) {
+            pack_special(r, 0, 0);              /* an exact zero is +0 */
+            return;
+        }
+        if (i > 0) {
+            fma_addsub(p, q, 1);
+        } else {
+            fma_addsub(q, p, 1);
+            for (i = 0; i < FMA_D; i++)
+                p[i] = q[i];
+            sign = sz;
+        }
+    }
+    /* 5: the leading 1, 63 bits from it, the rest jammed; then round */
+    lead = 16 * FMA_D - 1;
+    while (lead > 0 && !fma_bit(p, lead))
+        lead--;
+    sig.hi = 0;
+    sig.lo = 0;
+    for (b = 0; b < 63; b++) {
+        i = lead - 62 + b;
+        if (i >= 0 && fma_bit(p, i)) {
+            if (b < 32)
+                sig.lo = sig.lo | (1UL << b);
+            else
+                sig.hi = sig.hi | (1UL << (b - 32));
+        }
+    }
+    for (i = 0; i < lead - 62; i++)
+        if (fma_bit(p, i))
+            sig.lo = sig.lo | 1;
+    round_pack(r, sign, e + lead + 1022, &sig);
+}
+#endif
+
+/* ---- hexadecimal ------------------------------------------------------------------ */
+
+/* hi:lo (not 0) moved to bit 62, a bit shifted out jammed; exp2 adjusted
+ * to match, and clamped to a range wider than either format's. */
+static long hex_norm(struct u64 *sig, unsigned long hi, unsigned long lo, int sticky, long exp2)
+{
+    int shift;
+
+    u64_set(sig, hi, lo);
+    shift = u64_clz(sig) - 1;
+    if (shift < 0)
+        u64_shr_jam(sig, sig, 1);
+    else
+        u64_shl(sig, sig, shift);
+    sig->lo = sig->lo | (sticky != 0);
+    exp2 = exp2 - shift;
+    if (exp2 > 2000)
+        return 2000;
+    return exp2 < -2000 ? -2000 : exp2;
+}
+
+/* A hexadecimal constant's value is the integer hi:lo times 2^exp2; with
+ * the integer's leading 1 at bit 62, it is 1.f times 2^(exp2 + 62), so
+ * the biased exponent less one, which round_pack wants, is exp2 + 62 +
+ * 1022; round_pack32 takes the top 31 bits, the rest jammed, and exp2 +
+ * 62 + 126. Each is rounded once, from the exact value. */
+void sf64_from_hex(struct sf64 *r, unsigned long hi, unsigned long lo, int sticky, long exp2)
+{
+    struct u64 sig;
+
+    if (hi == 0 && lo == 0) {
+        pack_special(r, 0, 0);
+        return;
+    }
+    exp2 = hex_norm(&sig, hi, lo, sticky, exp2) + 1084;
+    round_pack(r, 0, (int)exp2, &sig);
+}
+
+unsigned long sf32_from_hex(unsigned long hi, unsigned long lo, int sticky, long exp2)
+{
+    struct u64 sig;
+
+    if (hi == 0 && lo == 0)
+        return 0;
+    exp2 = hex_norm(&sig, hi, lo, sticky, exp2) + 188;
+    return round_pack32(0, (int)exp2, sig.hi | (sig.lo != 0));
+}
+
 /* All the decimal digits of a finite, nonzero |a| into buf (no trailing
  * zeros), their count returned; |a| = d1.d2d3... * 10^*dexp.
  *

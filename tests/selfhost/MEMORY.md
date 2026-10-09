@@ -7,28 +7,28 @@ peak over the compiler's own sources and the C library, against its limit
 | Table | Peak | Limit | Use | Peak reached in |
 |---|---:|---:|---:|---|
 | cc1 cases | 24 | 300 | 8% | cc1: lex.c |
-| cc1 function strings | 228 | 400 | 57% | cpp: cpp.c |
-| cc1 globals | 427 | 1200 | 35% | cc1: stmt.c |
+| cc1 function strings | 244 | 400 | 61% | cpp: cpp.c |
+| cc1 globals | 462 | 1200 | 38% | cc1: stmt.c |
 | cc1 goto labels | 0 | 100 | 0% | cpp: cpp.c |
 | cc1 locals | 38 | 300 | 12% | libc: math.c |
-| cc1 members | 101 | 800 | 12% | libc: stdio.c |
+| cc1 members | 103 | 800 | 12% | libc: stdio.c |
 | cc1 name text | 8039 | 20000 | 40% | libc: vdpaudio.c |
-| cc1 names | 648 | 2000 | 32% | cc1: stmt.c |
+| cc1 names | 709 | 2000 | 35% | cc1: stmt.c |
 | cc1 nodes | 117 | 500 | 23% | cc1: stmt.c |
-| cc1 parameter types | 332 | 1500 | 22% | cc1: lex.c |
+| cc1 parameter types | 369 | 1500 | 24% | cc1: stmt.c |
 | cc1 switches | 3 | 100 | 3% | libc: math.c |
 | cc1 tags | 15 | 150 | 10% | cc1: emit.c |
-| cc1 types | 281 | 800 | 35% | cc1: stmt.c |
-| cc2 instructions | 2263 | 4000 | 56% | libc: math.c |
+| cc1 types | 305 | 800 | 38% | cc1: stmt.c |
+| cc2 instructions | 2656 | 4000 | 66% | libc: math99.c |
 | cc2 nodes | 100 | 500 | 20% | cc1: expr.c |
 | cc2 text | 16115 | 28000 | 57% | cc2: cc2.c |
-| cpp macro text | 4515 | 32000 | 14% | cc1: stmt.c |
-| cpp macros | 280 | 1200 | 23% | cc1: stmt.c |
+| cpp macro text | 4763 | 32000 | 14% | cc1: stmt.c |
+| cpp macros | 295 | 1200 | 24% | cc1: stmt.c |
 | ld implicit calls | 0 | 400 | 0% | cpp: link |
-| ld name bytes | 11776 | 40000 | 29% | cc1: link |
-| ld references | 2950 | 8000 | 36% | cc1: link |
-| ld sections | 844 | 1500 | 56% | cc1: link |
-| ld symbols | 879 | 3000 | 29% | cc1: link |
+| ld name bytes | 12386 | 40000 | 30% | cc1: link |
+| ld references | 3162 | 8000 | 39% | cc1: link |
+| ld sections | 882 | 1500 | 58% | cc1: link |
+| ld symbols | 917 | 3000 | 30% | cc1: link |
 | ld units | 22 | 64 | 34% | cc1: link |
 
 (Per-function and per-initialiser tables are the largest single function's or
@@ -40,8 +40,8 @@ build (64-bit pointers), so they overstate the device's.
 
 | Program | Image | bss | Free | Labels | Label memory | Fixup memory |
 |---|---:|---:|---:|---:|---:|---:|
-| cpp | 50017 | 197368 | 211367 | 392 | 17949 | 14392 |
-| cc1 | 139389 | 163363 | 156000 | 824 | 38602 | 26728 |
-| cc2 | 81372 | 129184 | 248196 | 409 | 19061 | 14392 |
-| ld | 33407 | 185829 | 239516 | 270 | 12318 | 8224 |
-| agonc | 18473 | 7935 | 6360 | 207 | 9473 | 4112 |
+| cpp | 52670 | 200950 | 205132 | 498 | 22799 | 24672 |
+| cc1 | 151363 | 177765 | 129624 | 952 | 44565 | 39064 |
+| cc2 | 81700 | 129165 | 247887 | 454 | 21111 | 18504 |
+| ld | 33839 | 185811 | 239102 | 314 | 14336 | 14392 |
+| agonc | 18716 | 7915 | 6137 | 227 | 10365 | 6168 |

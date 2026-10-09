@@ -341,7 +341,10 @@ void sys_init(char *argv0)
     for (i = 0; argv0[i]; i++)
         if (argv0[i] == '/' || argv0[i] == '\\')
             end = i + 1;
-    if (end > PATH_SIZE - 16)
+    /* the folder, a pass's name and ".exe" go into agonc.c's 128-byte
+     * buffers: a longer folder is not used (the passes are then looked
+     * for on the PATH) */
+    if (end > 128 - 16)
         end = 0;
     for (i = 0; i < end; i++) {
         pass_dir[i] = argv0[i];
@@ -505,7 +508,7 @@ void sys_remove(char *path)
     remove(path);
 }
 
-/* Nothing: on the host $AGONC_ROOT/tmp must exist already. */
+/* Nothing: on the host $AGONC_ROOT/tmp/agonc must exist already. */
 void sys_mkdir(char *path)
 {
 }

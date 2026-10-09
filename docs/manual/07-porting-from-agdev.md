@@ -15,26 +15,26 @@ In short:
 1. Change `#include <mos_api.h>` to `<agon/mos.h>` and `<agon/vdp_vdu.h>`
    to `<agon/vdp.h>`, and include `<stdint.h>` wherever `uint8_t` and its
    kind are used.
-2. Rewrite what C89 lacks: declarations in `for`, designated initialisers,
-   `bool`, `inline`, compound literals, variable-length arrays.
+2. Rewrite variable-length arrays and complex numbers, which agonc does
+   not have; the rest of C99 compiles in the default mode.
 3. Replace the few library functions agonc does not have, such as
-   `snprintf` and `strdup`.
+   `strdup`.
 4. Expect `double` to be 64 bits, and slower.
 5. Return `EXIT_FAILURE`, not 1, for a failure.
 6. Build with one `agonc` command instead of a makefile.
 
 ## The language
 
-AgDev's compiler takes C99 to C17, and C++. agonc takes C89 and, in
-its default mode, a few C99 features: `//` comments, `long long`,
-declarations after statements (with a warning), a comma after the last
-enumerator, and non-constant initialisers for local arrays and structures
-([The language](03-the-language.md#the-two-modes)). C++ has no counterpart.
+AgDev's compiler takes C99 to C17, and C++. agonc takes C99 but for
+variable-length arrays and complex numbers, with C89 in strict mode
+([The language](03-the-language.md#the-two-modes)). C11 and C17's
+additions (`_Generic`, `_Static_assert`, anonymous structures and the
+rest) and C++ have no counterpart.
 
-The C99 features agonc lacks fail with plain syntax errors, such as
-`expected an expression` for `for (int i = 0; ...)`. The
+The features agonc lacks fail with plain errors, such as `not an integer
+constant expression` for `int a[n];`. The
 [Messages](04-messages.md#code-written-for-c99-or-gcc) chapter has a table
-of these constructs, the message each produces and the C89 to write
+of these constructs, the message each produces and what to write
 instead. Two more differences catch ported code:
 
 - Calling a function with no declaration in scope is an error in the
@@ -65,8 +65,9 @@ instance); in agonc it is IEEE 754 binary64, with about 16 significant
 digits instead of 7, and every operation done in software on 8-byte
 values. A program that used `double` for speed gets more precision and
 less speed: change it to `float` where 7 digits are enough. agonc's
-`<math.h>` has only C89's `double` functions, so `sqrtf(x)` becomes
-`(float)sqrt(x)`, computed in `double`. A `float` passed to `printf` is
+`<math.h>` has the `float` functions too (`sqrtf` and the rest), but they
+work in `double` and round the result, so they are no faster than the
+`double` ones. A `float` passed to `printf` is
 promoted to `double`, as in any C. A file of `double` values written by an
 AgDev program holds 4-byte values: read them into `float`. What floating
 point and `long long` cost is in [The
@@ -78,20 +79,19 @@ not rely on AgDev's layout matching it in data written to files.
 
 ## The C library
 
-agonc has the whole C89 library ([The C library](05-c-library.md)), and
-AgDev's programs mostly use that part. The differences:
+agonc has the standard library, C99's included ([The C
+library](05-c-library.md)), and AgDev's programs mostly use that part. The
+differences:
 
 | AgDev | agonc |
 |---|---|
 | `fputs(s, f)` writes a newline after `s` | writes `s` only, as C requires: add the `'\n'` |
-| `snprintf`, `vsnprintf` | not provided: `sprintf` into a buffer large enough |
 | `strdup`, `strndup`, `strnlen` | not provided: `malloc` and `strcpy`, or a loop |
 | `strcasecmp`, `strncasecmp` | not provided: compare `tolower` of each character |
-| `strtof` | `(float)strtod(s, &end)` |
 | `isascii(c)` | `((c) & ~0x7F) == 0` |
 | `gets_s(s, n)` | `fgets(s, n, stdin)`, which keeps the newline |
 | `quick_exit`, `at_quick_exit`, `on_exit` | `exit` and `atexit` |
-| `<stdbool.h>`, `<inttypes.h>`, `<iso646.h>`, `<wchar.h>`, `<alloca.h>` | not provided |
+| `<wchar.h>`, `<alloca.h>` | not provided |
 | `EXIT_FAILURE` is 1 | `EXIT_FAILURE` is 200 ([exit status](#exit-status)) |
 | `RAND_MAX` is 8388607 | `RAND_MAX` is 32767, and the sequence differs |
 
@@ -317,7 +317,8 @@ compiler for the Z80, to run under CP/M on a Z80 machine or under
 [ZINC](https://github.com/nihirash/ZINC) on the Agon. HI-TECH C follows
 the draft ANSI standard of its time, prototypes included, so the best
 starting point is code that agonc accepts with `-ansi`: strict mode turns
-off `long long`, `//` comments and agonc's other extensions. What remains
+off `long long`, `//` comments, C99's other features and agonc's
+extensions. What remains
 is the machine:
 
 | | agonc | HI-TECH C 3.09 on the Z80 |

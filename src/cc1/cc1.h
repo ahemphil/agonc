@@ -105,6 +105,8 @@
 #define KW_VOLATILE 40
 #define KW_WHILE 41
 #define KW_ASM 42
+#define KW_INLINE 50      /* C99's inline, the default mode's (lex.c spots it: not a name-table keyword) */
+#define KW_BOOL 51        /* C99's _Bool, likewise */
 #define NKW 34            /* the last, __asm, is KW_ASM in both modes */
 /* punctuators: single characters are TK_P + the character */
 #define TK_P 100
@@ -157,6 +159,7 @@
 #define TY_LDOUBLE 18   /* long double: a distinct type, double's representation */
 #define TY_LLONG 19     /* long long (the default mode's, C99): 64 bits, handled by address */
 #define TY_ULLONG 20
+#define TY_BOOL 21      /* C99's _Bool: one byte, 0 or 1 (conversion to it is != 0) */
 
 #define Q_CONST 1       /* type qualifiers (struct type.qual) */
 #define Q_VOLATILE 2
@@ -190,6 +193,7 @@ struct type {
 #define T_LDOUBLE 12
 #define T_LLONG 13
 #define T_ULLONG 14
+#define T_BOOL 15
 
 /* struct and enum tags: one namespace, file scope plus the current function.
  * A union is a struct tag with is_union set; its type is TY_STRUCT too. */
@@ -204,6 +208,7 @@ struct tag {
     unsigned char bits;         /* the bits used in the last byte by bit-fields (abi.md 2) */
     unsigned char complete;
     unsigned char local;        /* declared inside the current function: its scope depth */
+    unsigned char flex;         /* a struct ending in a flexible array member (C99) */
 };
 
 /* one struct or union member; a tag's members form a list in declaration
@@ -453,6 +458,8 @@ extern struct sf64 fbits[MAX_NODES];
 extern int nnodes;               /* nodes in use: a statement saves it and resets to it */
 extern int peak_nodes;
 extern int in_function;          /* parsing a function body (not a file-scope initialiser) */
+extern char *cur_func_name;
+int compound_literal(int t);      /* that function's name, for __func__ (set by stmt.c) */
 extern int fp_used;             /* the function has a float or double value */
 extern int ll_used;              /* the function has a long long value */
 

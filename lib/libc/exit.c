@@ -78,6 +78,14 @@ void exit(int status)
     end(status, 1);
 }
 
+/* C99's: no atexit functions and no signal handlers, but the streams are
+ * still written and closed (which C99 leaves to the implementation), as
+ * MOS would otherwise lose their handles for the session. */
+void _Exit(int status)
+{
+    end(status, 1);
+}
+
 /* SIGABRT's handler, if any, runs first; if it returns, or the signal is
  * ignored, the program still ends (C89 4.10.4.1): the files are closed,
  * without writing what their buffers hold, and the status is 134. */

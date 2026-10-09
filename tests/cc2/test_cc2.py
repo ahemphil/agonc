@@ -36,7 +36,7 @@ CC2 = os.path.join("build", "host", "cc2.exe")
 LD = os.path.join("build", "host", "ld.exe")
 ASM = os.path.join("third_party", "bin", "ez80asm.exe")
 RUNTIME = [os.path.join("lib", "rt", "crt0.s"), os.path.join("lib", "rt", "rt.s"),
-           os.path.join("build", "agon", "lib", "libc.s")]
+           os.path.join("build", "agon", "lib", "agonc", "libc.s")]
 
 
 def sh(cmd, **kw):
@@ -269,8 +269,8 @@ def errors():
 
 def main():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
-    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "libc.s")):
-        print("build/agon/lib/libc.s is missing: run make cross first")
+    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "agonc", "libc.s")):
+        print("build/agon/lib/agonc/libc.s is missing: run make cross first")
         return 1
     gen("exec")
     cases = [("T1 golden count.ir", lambda: t1("--update" in sys.argv)),

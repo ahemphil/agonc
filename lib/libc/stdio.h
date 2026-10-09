@@ -8,13 +8,17 @@
  * are /tmp/tNNNNN.tmp (/tmp must exist).
  *
  * The printf family supports %d %i %u %x %X %o %c %s %p %n %% and
- * %e %f %g %E %G, with C99's %F (%f, but INF and NAN in capitals); the
- * flags '-', '0', '+', ' ' and '#'; width and precision ('*' accepted);
- * and the length modifiers 'h' (short), 'l' (long), 'L' (long double,
- * which is double), and C99's 'll' and 'j' (long long, which strict mode
- * lacks). %p is six lower-case hex digits; a null %s prints "(null)". The
- * scanf family supports every C89 conversion, %F, and the same length
- * modifiers; a '-' inside a %[ set makes a range (%[a-z]).
+ * %e %f %g %E %G, with C99's %F (%f, but INF and NAN in capitals) and %a
+ * %A (hexadecimal, exact unless a precision rounds it); the flags '-',
+ * '0', '+', ' ' and '#'; width and precision ('*' accepted); and the
+ * length modifiers 'h' (short), 'l' (long), 'L' (long double, which is
+ * double), and C99's 'hh' (char), 'z' and 't' (size_t and ptrdiff_t), and
+ * 'll' and 'j' (long long, which strict mode lacks). %p is six lower-case
+ * hex digits; a null %s prints "(null)". The scanf family supports every
+ * C89 conversion, %F, %a and the same length modifiers; a '-' inside a
+ * %[ set makes a range (%[a-z]). Outside strict mode its floating
+ * conversions read what C99's strtod does: hexadecimal, inf, infinity and
+ * nan too.
  *
  * FOPEN_MAX counts the three standard streams, but they hold no MOS
  * handle, so up to eight files may be open besides them (MOS's limit,
@@ -133,5 +137,21 @@ int vsprintf(char *s, const char *format, char *arg);
 int scanf(const char *format, ...);
 int fscanf(FILE *stream, const char *format, ...);
 int sscanf(const char *s, const char *format, ...);
+
+#if !defined(__STRICT_ANSI__)
+/* C99's scanf family, whose floating conversions read hexadecimal, inf
+ * and nan as well: the plain names are C89's, which strict mode keeps */
+int __scanf99(const char *format, ...);
+int __fscanf99(FILE *stream, const char *format, ...);
+int __sscanf99(const char *s, const char *format, ...);
+#define scanf __scanf99
+#define fscanf __fscanf99
+#define sscanf __sscanf99
+int snprintf(char *s, size_t n, const char *format, ...);
+int vsnprintf(char *s, size_t n, const char *format, char *arg);
+int vscanf(const char *format, char *arg);
+int vfscanf(FILE *stream, const char *format, char *arg);
+int vsscanf(const char *s, const char *format, char *arg);
+#endif
 
 #endif

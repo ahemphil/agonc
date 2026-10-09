@@ -7,12 +7,15 @@
 ; MOS calls a keyboard vector from inside its UART0 interrupt with DE
 ; pointing at the key packet, having saved only AF, BC, DE and HL; the
 ; hardware enters an interrupt vector with nothing saved at all. A C
-; function expects neither: it may change IY (and A, F, BC, DE, HL),
-; and the runtime helpers it calls (multiply, divide, shifts) keep their
+; function expects neither: it may change IY (and A, F, BC, DE, HL, and
+; the alternate registers, which int64.c's long long division uses), and
+; the runtime helpers it calls (shifts, sign extensions) keep their
 ; working values in fixed cells, which an interrupted helper in the main
 ; program is still using. So each entry here saves what MOS or the
-; hardware does not, and __handler_call saves and restores every rt.s
-; scratch cell around the C function.
+; hardware does not, and __handler_call saves and restores AF', BC', DE',
+; HL' and every rt.s scratch cell around the C function. (MOS's own
+; interrupt handlers, vblank, UART0 and I2C, never touch the alternate
+; registers, in MOS 2.3.3 and 3.0.2 alike.)
 ;
 ; The keyboard entry runs the library's Ctrl-C check first (crt0.s's
 ; __kbhandler), so a key handler never costs the program its Ctrl-C.
@@ -51,15 +54,17 @@ __kb_entry:
         pop     ix
         ret
 
-; Calls the C function at HL with DE as its argument, saving the runtime
-; helpers' scratch cells on the stack around it (35 bytes in 12 pushes).
-; Clobbers everything but IX (the C function keeps it) and SP.
+; Calls the C function at HL with DE as its argument, saving around it
+; the runtime helpers' scratch cells (12 bytes in 4 pushes) and the
+; alternate registers AF', BC', DE' and HL' (12 bytes in 4 pushes), which
+; int64.c's long long division keeps working values in: neither MOS nor
+; the hardware saves them, and the C function may divide.
+; Clobbers everything else but IX (the C function keeps it) and SP.
 ;
-; The cells are every bss cell rt.s has: the 6-byte buffers of __imul,
-; __idivu and __iremu (two 3-byte pushes each), the 3-byte ones of
-; __imul_res, the shifts and the sign extensions, and the two one-byte
-; sign flags of __idivs and __irems, packed into H and L of one push.
-; The restore pops them in the reverse order.
+; The cells are every bss cell rt.s has: the 3-byte ones of the shifts and
+; the sign extensions. The restore pops them in the reverse order.
+; (__imul and the divide helpers have no cells: they work in registers and
+; on the stack, so an interrupted multiply or divide needs nothing saved.)
 ;
 ; The call itself follows the C convention (abi.md section 4): the
 ; argument pushed as one 3-byte slot, the return address above it, and
@@ -68,12 +73,6 @@ __kb_entry:
 ; function entered with jp (iy); HL is needed for the cells, so the
 ; function's address waits in IY.
 ;;sect code __handler_call g
-;;ref __imul_buf
-;;ref __imul_res
-;;ref __idivu_buf
-;;ref __iremu_buf
-;;ref __idivs_neg
-;;ref __irems_neg
 ;;ref __ishru_buf
 ;;ref __ishrs_buf
 ;;ref __sext8_buf
@@ -81,20 +80,14 @@ __kb_entry:
 __handler_call:
         push    hl
         pop     iy                      ; iy = the function
-        ld      hl, (__imul_buf)
+        ex      af, af'
+        push    af
+        ex      af, af'
+        exx
+        push    bc
+        push    de
         push    hl
-        ld      hl, (__imul_buf+3)
-        push    hl
-        ld      hl, (__imul_res)
-        push    hl
-        ld      hl, (__idivu_buf)
-        push    hl
-        ld      hl, (__idivu_buf+3)
-        push    hl
-        ld      hl, (__iremu_buf)
-        push    hl
-        ld      hl, (__iremu_buf+3)
-        push    hl
+        exx
         ld      hl, (__ishru_buf)
         push    hl
         ld      hl, (__ishrs_buf)
@@ -103,22 +96,12 @@ __handler_call:
         push    hl
         ld      hl, (__sext16_buf)
         push    hl
-        ld      a, (__idivs_neg)
-        ld      h, a
-        ld      a, (__irems_neg)
-        ld      l, a
-        push    hl
         push    de                      ; the argument
         ld      hl, @back
         push    hl                      ; the return address
         jp      (iy)
 @back:
         pop     de                      ; the argument back off
-        pop     hl
-        ld      a, l
-        ld      (__irems_neg), a
-        ld      a, h
-        ld      (__idivs_neg), a
         pop     hl
         ld      (__sext16_buf), hl
         pop     hl
@@ -127,20 +110,14 @@ __handler_call:
         ld      (__ishrs_buf), hl
         pop     hl
         ld      (__ishru_buf), hl
+        exx
         pop     hl
-        ld      (__iremu_buf+3), hl
-        pop     hl
-        ld      (__iremu_buf), hl
-        pop     hl
-        ld      (__idivu_buf+3), hl
-        pop     hl
-        ld      (__idivu_buf), hl
-        pop     hl
-        ld      (__imul_res), hl
-        pop     hl
-        ld      (__imul_buf+3), hl
-        pop     hl
-        ld      (__imul_buf), hl
+        pop     de
+        pop     bc
+        exx
+        ex      af, af'
+        pop     af
+        ex      af, af'
         ret
 
 ; The interrupt slots: everything saved, the C function called, and the

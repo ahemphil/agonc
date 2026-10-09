@@ -4401,6 +4401,7 @@ int main(int argc, char **argv)
     out_f = fopen(out_path, "wb");
     if (out_f == NULL) {
         fprintf(stderr, "cc2: cannot create %s\n", out_path);
+        rd_close(&in_rd);               /* MOS would not close it */
         return 200;
     }
     translate();

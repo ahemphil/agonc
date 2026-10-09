@@ -7,6 +7,7 @@
 #define sf32_div c_sf32_div
 #define sf32_from_decimal c_sf32_from_decimal
 #define sf32_from_f64 c_sf32_from_f64
+#define sf32_from_hex c_sf32_from_hex
 #define sf32_from_long c_sf32_from_long
 #define sf32_from_long64 c_sf32_from_long64
 #define sf32_mul c_sf32_mul
@@ -20,6 +21,7 @@
 #define sf64_div c_sf64_div
 #define sf64_from_decimal c_sf64_from_decimal
 #define sf64_from_f32 c_sf64_from_f32
+#define sf64_from_hex c_sf64_from_hex
 #define sf64_from_long c_sf64_from_long
 #define sf64_from_long64 c_sf64_from_long64
 #define sf64_mul c_sf64_mul

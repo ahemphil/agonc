@@ -25,7 +25,7 @@ include config.mk
 PASSES := cpp cc1 cc2 ld
 PROGS := $(PASSES) agonc
 LIBC_S := $(foreach u,ctype malloc stdio stdlib string exit time mos,build/cross/$(u).s)
-LIBM_S := $(foreach u,fp math ll,build/cross/$(u).s)
+LIBM_S := $(foreach u,fp math math99 mathf ll,build/cross/$(u).s)
 LIBAGON_UNITS := uart vdp mosapi sysvar vdpsys vdpbmp vdpaudio vdpbuf vdpmore handler
 LIBAGON_S := $(foreach u,$(LIBAGON_UNITS),build/cross/$(u).s) lib/agon/kbint.s
 
@@ -82,19 +82,19 @@ stage1:
 
 # ---- the SD-card trees ---------------------------------------------------------
 #
-# Both put the headers and runtime in /lib and ez80asm in /bin; `lib_tree`
-# does that part.
+# Both put the headers and runtime in /lib/agonc and ez80asm in /bin;
+# `lib_tree` does that part. /lib itself is left to other programs.
 
 define lib_tree
 	$(call MKDIR,$1/bin/agonc)
-	$(call MKDIR,$1/lib/agon)
+	$(call MKDIR,$1/lib/agonc/agon)
 	$(call MKDIR,$1/usrlib)
 	$(call MKDIR,$1/mos)
 	$(call CP,third_party/ez80asm/ez80asm.bin,$1/bin/ez80asm.bin)
-	$(call CP,lib/libc/*.h,$1/lib/)
-	$(call CP,lib/agon/*.h,$1/lib/agon/)
-	$(call CP,lib/rt/crt0.s,$1/lib/crt0.s)
-	$(call CP,lib/rt/rt.s,$1/lib/rt.s)
+	$(call CP,lib/libc/*.h,$1/lib/agonc/)
+	$(call CP,lib/agon/*.h,$1/lib/agonc/agon/)
+	$(call CP,lib/rt/crt0.s,$1/lib/agonc/crt0.s)
+	$(call CP,lib/rt/rt.s,$1/lib/agonc/rt.s)
 endef
 
 # build/sdcard: the bootstrap card. Stage 1 in /bin/agonc, and under /agonc
@@ -155,7 +155,7 @@ cross: host
 	$(call RMDIR,$(AGON))
 	$(call RMDIR,build/cross)
 	$(call lib_tree,$(AGON))
-	$(call MKDIR,$(AGON)/tmp)
+	$(call MKDIR,$(AGON)/tmp/agonc)
 	$(call MKDIR,build/cross)
 	$(DRIVER) -O -Werror -c -o build/cross/ctype.s lib/libc/ctype.c
 	$(DRIVER) -O -Werror -c -o build/cross/malloc.s lib/libc/malloc.c
@@ -166,6 +166,8 @@ cross: host
 	$(DRIVER) -O -Werror -c -o build/cross/time.s lib/libc/time.c
 	$(DRIVER) -O -Werror -c -o build/cross/fp.s lib/libc/fp.c
 	$(DRIVER) -O -Werror -c -o build/cross/math.s lib/libc/math.c
+	$(DRIVER) -O -Werror -c -o build/cross/math99.s lib/libc/math99.c
+	$(DRIVER) -O -Werror -c -o build/cross/mathf.s lib/libc/mathf.c
 	$(DRIVER) -O -Werror -c -o build/cross/ll.s lib/libc/ll.c
 	$(DRIVER) -O -Werror -c -o build/cross/mos.s lib/agon/mos.c
 	$(DRIVER) -O -Werror -c -o build/cross/uart.s lib/agon/uart.c
@@ -178,10 +180,10 @@ cross: host
 	$(DRIVER) -O -Werror -c -o build/cross/vdpbuf.s lib/agon/vdpbuf.c
 	$(DRIVER) -O -Werror -c -o build/cross/vdpmore.s lib/agon/vdpmore.c
 	$(DRIVER) -O -Werror -c -o build/cross/handler.s lib/agon/handler.c
-	$(call CAT,$(LIBC_S),$(AGON)/lib/libc.s)
-	$(call CAT,$(LIBM_S),$(AGON)/lib/libm.s)
-	$(call CAT,$(LIBAGON_S),$(AGON)/lib/libagon.s)
-	$(DRIVER) --index $(AGON)/lib/crt0.s $(AGON)/lib/rt.s $(AGON)/lib/libc.s $(AGON)/lib/libm.s $(AGON)/lib/libagon.s
+	$(call CAT,$(LIBC_S),$(AGON)/lib/agonc/libc.s)
+	$(call CAT,$(LIBM_S),$(AGON)/lib/agonc/libm.s)
+	$(call CAT,$(LIBAGON_S),$(AGON)/lib/agonc/libagon.s)
+	$(DRIVER) --index $(AGON)/lib/agonc/crt0.s $(AGON)/lib/agonc/rt.s $(AGON)/lib/agonc/libc.s $(AGON)/lib/agonc/libm.s $(AGON)/lib/agonc/libagon.s
 	$(DRIVER) -o $(AGON)/bin/agonc/cpp.bin @bootstrap/cpp.rsp
 	$(DRIVER) -o $(AGON)/bin/agonc/cc1.bin @bootstrap/cc1.rsp
 	$(DRIVER) -o $(AGON)/bin/agonc/cc2.bin @bootstrap/cc2.rsp

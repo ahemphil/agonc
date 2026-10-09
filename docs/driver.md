@@ -73,7 +73,7 @@ the implicit runtime and libraries → one `.asm`, then `ez80asm <file>.asm
 layout printed by `ld` and reports "image too large" if code and data reach
 the bss base.
 
-Intermediate files go in `/tmp/` (created if missing) as
+Intermediate files go in `/tmp/agonc/` (created if missing) as
 `<base>.i`, `<base>.ir`, `<base>.s`, `<out>.asm`, and are deleted after a
 successful build unless `-save-temps`. The default output name is `a.bin`.
 
@@ -99,6 +99,7 @@ with its output, which the driver lets through unfiltered.
 | `-w`, `-Wall`, `-Werror` | suppress warnings; all warnings (default); warnings are errors |
 | `--index lib.s...` | have `ld` write each library's index, `lib.idx`, which makes links that use it faster (object_format.md §9); nothing else is done |
 | `-std=c89`, `-std=c90`, `-ansi` | strict mode (c89_spec.md §1), passed to `cpp` and `cc1` as `-ansi` |
+| `-std=c99`, `-std=gnu99` | the default mode: undoes an earlier `-ansi` (the last of these options wins, as in gcc) |
 | `-nostdlib` | do not add `crt0.s`, `rt.s`, `libc.s`, `libm.s`, `libagon.s` |
 | `-lm` | link `libm.s` even if no unit asks for it (§4) |
 | `-save-temps` | keep the intermediate files |
@@ -133,13 +134,13 @@ mode (c89_spec.md §13, item 9).
 
 | Directory | Contents |
 |---|---|
-| `/lib` | `stdio.h`, `string.h`, …, `libc.s`, `libm.s`, `libagon.s`, `crt0.s`, `rt.s`, and their indexes |
-| `/lib/agon` | `mos.h`, `uart.h`, `vdp.h`, included as `<agon/vdp.h>`; their functions are in `libc.s` (what the C library itself uses) and `libagon.s` |
+| `/lib/agonc` | `stdio.h`, `string.h`, …, `libc.s`, `libm.s`, `libagon.s`, `crt0.s`, `rt.s`, and their indexes |
+| `/lib/agonc/agon` | `mos.h`, `uart.h`, `vdp.h`, included as `<agon/vdp.h>`; their functions are in `libc.s` (what the C library itself uses) and `libagon.s` |
 | `/usrlib` | user libraries: `foo.h` and `libfoo.s`, or a sub-folder per library |
 
-`#include <name>`: `-I` directories, then `/usrlib`, then `/lib`.
+`#include <name>`: `-I` directories, then `/usrlib`, then `/lib/agonc`.
 `#include "name"`: the including file's directory first, then as for `<>`.
-`-lfoo`: `-L` directories, then `/usrlib`, `/lib/agon`, `/lib`.
+`-lfoo`: `-L` directories, then `/usrlib`, `/lib/agonc/agon`, `/lib/agonc`.
 
 The library is in two parts. `libc.s` is linked into every program;
 `libm.s`, the floating-point and `long long` part (their arithmetic
@@ -156,7 +157,7 @@ A third part, `libagon.s`, holds the Agon interface beyond what the C
 library itself uses: the rest of the MOS API, the FatFS calls, the
 serial port and the VDU commands (`<agon/mos.h>`, `<agon/uart.h>`,
 `<agon/vdp.h>`). The driver always passes it last, as `--if-needed
-/lib/libagon.s`: `ld` reads it (through its index) only when the rest of
+/lib/agonc/libagon.s`: `ld` reads it (through its index) only when the rest of
 the program leaves a function undefined, so a program that uses none
 of it links as fast as before (object_format.md §9).
 MOS 2.3.3 has no system variables, so these paths are compiled in; `-I`
@@ -168,8 +169,8 @@ under the directory named by the `AGONC_ROOT` environment variable.
 MOS rejects a command line over 246 characters and reads script lines into
 256-byte buffers. The driver keeps each pass's argument string short by
 passing file names only; include directories, macro definitions and
-library lists that would not fit are written to `/tmp/<pass>.rsp` and
-passed as `@/tmp/<pass>.rsp`, so **every pass accepts `@file`**, as the
+library lists that would not fit are written to `/tmp/agonc/<pass>.rsp`
+and passed as `@/tmp/agonc/<pass>.rsp`, so **every pass accepts `@file`**, as the
 driver does.
 
 ## 6. Exit status
@@ -202,18 +203,20 @@ What the implementation (`src/agonc/`) settles that the sections above
 leave open.
 
 - **The host layout.** Passes are found beside the driver (the directory of
-  its `argv[0]`), `ez80asm` on the `PATH`, and `/lib`, `/usrlib` and `/tmp`
-  under `$AGONC_ROOT`. On the host `$AGONC_ROOT/tmp` must already exist; on
-  the Agon the driver creates `/tmp`. Because `cpp`'s compiled-in `/usrlib`
-  and `/lib` are the Agon's, the host driver passes `-I$AGONC_ROOT/usrlib
-  -I$AGONC_ROOT/lib` after the user's `-I` options.
+  its `argv[0]`), `ez80asm` on the `PATH`, and `/lib/agonc`, `/usrlib` and
+  `/tmp/agonc` under `$AGONC_ROOT`. On the host `$AGONC_ROOT/tmp/agonc`
+  must already exist; on the Agon the driver creates `/tmp` and
+  `/tmp/agonc` as needed. Because `cpp`'s compiled-in `/usrlib` and
+  `/lib/agonc` are the Agon's, the host driver passes
+  `-I$AGONC_ROOT/usrlib -I$AGONC_ROOT/lib/agonc` after the user's `-I`
+  options.
 - **`-Wl,a,b,...`** passes each comma-separated word to `ld`, not only
   `--entry=sym`. `-Wl,--moslet` links for the moslet area
   (object_format.md §7); that is how the driver itself is built.
 - **Response files** (§5): the driver calls a pass directly, not through
   MOS's command line, so the limits that matter are the pass's own. A pass
   whose argument string exceeds 200 characters or 14 words gets all of it
-  as `@/tmp/<pass>.rsp`. The 14 is the stage-1 passes' limit: AgDev's
+  as `@/tmp/agonc/<pass>.rsp`. The 14 is the stage-1 passes' limit: AgDev's
   start-up code stops splitting at `argc` 15, the program's own name
   included, and silently drops the rest of the line.
 - **The assembler's success is its output file.** The Agon build of

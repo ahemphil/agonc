@@ -121,6 +121,7 @@ void type_init(void)
     new_type(TY_LDOUBLE, -1, 0, 8);
     new_type(TY_LLONG, -1, 0, 8);
     new_type(TY_ULLONG, -1, 0, 8);
+    new_type(TY_BOOL, -1, 0, 1);
     for (i = 0; i < MAX_NAMES; i++) {
         global_of[i] = -1;
         local_of[i] = -1;
@@ -150,6 +151,7 @@ int add_tag(int name, int is_enum, int local)
     tags[ntags].is_union = 0;
     tags[ntags].fill = 0;
     tags[ntags].bits = 0;
+    tags[ntags].flex = 0;
     tags[ntags].type = is_enum ? T_INT : new_type(TY_STRUCT, ntags, 0, 0);
     tags[ntags].members = -1;
     tags[ntags].complete = is_enum;
@@ -363,7 +365,7 @@ int is_integer(int t)
 
     k = types[t].kind;
     return k == TY_CHAR || k == TY_UCHAR || k == TY_INT || k == TY_UINT || k == TY_SCHAR || k == TY_SHORT
-        || k == TY_USHORT || k == TY_LONG || k == TY_ULONG || k == TY_LLONG || k == TY_ULLONG;
+        || k == TY_USHORT || k == TY_LONG || k == TY_ULONG || k == TY_LLONG || k == TY_ULLONG || k == TY_BOOL;
 }
 
 /* unsigned arithmetic for t: the unsigned integers and pointers (an
@@ -373,7 +375,8 @@ int is_unsigned(int t)
     int k;
 
     k = types[t].kind;
-    return k == TY_UINT || k == TY_UCHAR || k == TY_PTR || k == TY_USHORT || k == TY_ULONG || k == TY_ULLONG;
+    return k == TY_UINT || k == TY_UCHAR || k == TY_PTR || k == TY_USHORT || k == TY_ULONG || k == TY_ULLONG
+        || k == TY_BOOL;
 }
 
 /* long or unsigned long: a 32-bit L value (not long long) */
@@ -476,7 +479,7 @@ int promote(int t)
     int k;
 
     k = types[t].kind;
-    if (k == TY_CHAR || k == TY_UCHAR || k == TY_SCHAR || k == TY_SHORT || k == TY_USHORT)
+    if (k == TY_CHAR || k == TY_UCHAR || k == TY_SCHAR || k == TY_SHORT || k == TY_USHORT || k == TY_BOOL)
         return T_INT;
     return unqual(t);
 }

@@ -316,7 +316,7 @@ int init_template(int t)
 static int size_of_scalar(int t)
 {
     switch (types[t].kind) {
-    case TY_CHAR: case TY_SCHAR: case TY_UCHAR: return 1;
+    case TY_CHAR: case TY_SCHAR: case TY_UCHAR: case TY_BOOL: return 1;
     case TY_SHORT: case TY_USHORT: return 2;
     }
     return 3;
@@ -501,12 +501,15 @@ void emit_rvalue(int n)
         emit_addr(nodes[n].a);
         return;
     case EN_BITF:
-        /* the unit (one byte, or three), shifted down, masked or sign-extended
-         * (shifted up to put the field's top bit at bit 23, then
-         * arithmetically back down); no mask is needed for a full byte
-         * at bit 0, which LD 1 u already zero-extends */
+        /* the unit, shifted down, masked or sign-extended (shifted up to
+         * put the field's top bit at bit 23, then arithmetically back
+         * down); no mask is needed for a full byte at bit 0, which LD 1 u
+         * already zero-extends. The unit is the bytes the field occupies
+         * and no more: one byte for up to 8 bits, else (a wider field
+         * starts on a byte) two bytes for up to 16 and three for more, so
+         * nothing past the field is read, or written back by bf_store */
         emit_rvalue(nodes[n].a);
-        emit_line(nodes[n].c <= 8 ? "LD 1 u" : "LD 3 u");
+        emit_line(nodes[n].c <= 8 ? "LD 1 u" : nodes[n].c <= 16 ? "LD 2 u" : "LD 3 u");
         if (nodes[n].val > 0) {
             emit_fmt("C %d", nodes[n].val);
             emit_line("SHRU");
@@ -560,7 +563,7 @@ void emit_rvalue(int n)
     case EN_ASSIGN:
         emit_addr(nodes[n].a);
         emit_rvalue(nodes[n].b);
-        if (types[t].kind == TY_STRUCT)
+        if (types[t].kind == TY_STRUCT || types[t].kind == TY_ARRAY)       /* (an array: a compound literal's copy) */
             emit_fmt("COPY %d", type_size(t));
         else if (is_long(t))
             emit_line("ST.l");
@@ -604,7 +607,9 @@ void emit_rvalue(int n)
         } else if (kind_of(s) != kind_of(t)) {
             sprintf(buf, "CV %s %s", cv_name(from, s), cv_name(to, t));
             emit_line(buf);
-        } else if (kind_of(t) == 'I' && size_of_scalar(t) < 3 && !is_pointer(t)) {
+        } else if (kind_of(t) == 'I' && size_of_scalar(t) < 3 && !is_pointer(t) && types[t].kind != TY_BOOL) {
+            /* narrowing re-extends; not to _Bool, a cast only of a
+             * comparison's 0 or 1 (expr.c's to_bool) */
             sprintf(buf, "EXT %d %s", size_of_scalar(t), sign_of(t));
             emit_line(buf);
         }
@@ -842,7 +847,9 @@ void func_end(void)
     frame = deepest;
     for (i = 0; i < nlocals; i++) {
         if (locals[i].temp) {
-            frame = frame + (is_struct(locals[i].type) ? type_size(locals[i].type) : 3 * slots(locals[i].type));
+            /* (an array: a compound literal's) */
+            k = types[locals[i].type].kind;
+            frame = frame + (k == TY_STRUCT || k == TY_ARRAY ? type_size(locals[i].type) : 3 * slots(locals[i].type));
             off[i] = -frame;
         }
     }

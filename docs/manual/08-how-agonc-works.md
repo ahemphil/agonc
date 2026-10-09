@@ -32,11 +32,12 @@ card, runs, and returns its status to the driver.
 Splitting the work this way keeps each program small enough for the Agon's
 memory, and every file between the passes is plain text that can be read,
 compared and even written by hand: `agonc -save-temps` keeps them all in
-`/tmp`.
+`/tmp/agonc`.
 
 ## The passes
 
-**cpp** handles the preprocessing language of C89: it reads the source line
+**cpp** handles C's preprocessing language, with C99's variadic macros
+and `_Pragma` outside strict mode: it reads the source line
 by line, expands macros (with the rules for `#`, `##` and rescanning), keeps
 a stack for `#if`, and opens only one file at a time.
 

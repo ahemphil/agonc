@@ -32,7 +32,7 @@ from common import REPO, PY, AGON, RUN_EMULATOR, OPT, host, host_env  # noqa: E4
 from unitid import unit_id  # noqa: E402
 
 RT = os.path.join("build", "test", "testrt")
-LIB_UNITS = [os.path.join("lib", "libc", u + ".c") for u in ("ctype", "malloc", "stdio", "stdlib", "string", "exit", "time", "fp", "math", "ll")] + \
+LIB_UNITS = [os.path.join("lib", "libc", u + ".c") for u in ("ctype", "malloc", "stdio", "stdlib", "string", "exit", "time", "fp", "math", "math99", "mathf", "ll")] + \
             [os.path.join("lib", "agon", "mos.c")]
 DONE_C = "#include <agon/mos.h>\nint main(void)\n{\n    agon_emu_exit(0);\n    return 0;\n}\n"
 

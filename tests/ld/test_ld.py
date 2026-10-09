@@ -22,7 +22,7 @@ OUT = os.path.join(REPO, "build", "test", "ld")
 PY = sys.executable
 
 RUNTIME = [os.path.join(REPO, p) for p in (
-    r"lib\rt\crt0.s", r"lib\rt\rt.s", r"build\agon\lib\libc.s")]
+    r"lib\rt\crt0.s", r"lib\rt\rt.s", r"build\agon\lib\agonc\libc.s")]
 
 
 def c(name):
@@ -272,7 +272,7 @@ def main():
         failed += bool(problems)
     if "--no-emu" not in sys.argv:
         if not os.path.exists(RUNTIME[2]):
-            print("build/agon/lib/libc.s is missing: run make cross first")
+            print("build/agon/lib/agonc/libc.s is missing: run make cross first")
             return 1
         problems = emulator_case(exe)
         print(("PASS  " if not problems else "FAIL  ") + "emulator_hello (runtime link, exit 42)")

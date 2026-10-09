@@ -39,9 +39,11 @@ its `db`/`dw`/`dl` lines. A `bss` section has no body at all.
   linkage, `__s<id>_name` for internal linkage (ABI §7). `cc2` mangles;
   `ld` compares strings.
 - The unit id is the low 16 bits of an FNV-1a hash of the unit name as
-  given to the driver, printed as 4 lowercase hex digits. Two units with
-  the same name in one link are a link error ("duplicate unit"), which also
-  catches an id collision between different names.
+  given to the driver, printed as 4 lowercase hex digits. Units are not
+  required to have different names: a program's `fp.c` may be linked with
+  the library's. Two units with the same id (the same name, or two names
+  that hash alike) matter only if both have a static of the same name,
+  which is then a duplicate definition.
 - Every reference a section makes to a symbol outside itself is listed with
   `;;ref`, including helpers (`__imul`), library functions and data objects.
   `cc2` derives the list from the IR. For inline assembly text `cc2` adds a
@@ -90,7 +92,7 @@ and reference list. Record every `;;label`. Build:
 - the reference graph: section → referenced symbols.
 
 **Pass 2, select.** Starting from the roots (`__start`, plus `--entry`
-symbols, plus every `g` symbol of a user unit if `--keep-all`), walk the
+symbols), walk the
 graph and mark reachable sections. Unresolved references in reachable
 sections are "undefined symbol" errors, reported with the referencing unit
 and section. Unreachable sections are dropped: this is what lets a library
@@ -147,7 +149,7 @@ size.
 
 **Diagnostics.** `undefined symbol X (referenced from unit U, section S)`,
 `duplicate definition of X (units U1 and U2)`, `duplicate label X (units U1
-function F1 and U2 function F2)`, `duplicate unit name U`, `image too large:
+function F1 and U2 function F2)`, `image too large:
 code+data reaches __bss_base` (checked after assembly from the binary size,
 by the driver). Exit status 200 on any error.
 
@@ -274,7 +276,7 @@ section's `;;sect` line at `<mark>` before copying, so an index made from a
 different file of the same size is an error ("`x.idx` does not match
 `x.s`"), reported once. The output is byte-identical with and without
 indexes. The bootstrap and `make cross` index `crt0.s`, `rt.s`, `libc.s`
-and `libm.s` in `/lib`; `-v` reports how many inputs were read through an
+and `libm.s` in `/lib/agonc`; `-v` reports how many inputs were read through an
 index.
 
 **Clean sections.** Pass 4 drops full-line comments and blank lines. A
@@ -292,7 +294,7 @@ reachable from the roots (`__start` and `--entry`) still make a strong
 reference to an undefined symbol; several such libraries are tried in
 order. Reading even an index costs time on the Agon (about 0.8 s for
 `libc.idx`), and a program that uses nothing in a library should not
-pay it. The driver passes `/lib/libagon.s` this way. `-v` reports how
+pay it. The driver passes `/lib/agonc/libagon.s` this way. `-v` reports how
 many were read.
 
 Measured on the emulator at the Agon's speed: `ld` for a

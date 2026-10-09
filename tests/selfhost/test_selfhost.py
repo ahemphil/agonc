@@ -12,12 +12,12 @@ the driver; the driver and stage 1 build stage 2; stage 2 is installed; it
 builds everything again as stage 3, and compare checks each program and
 library unit against stage 2 (a difference stops the script). Then the
 installed stage-2 driver builds cc1's t_exec.c, t_m4.c and t_m13.c (floating
-point: the driver adds /lib/libm.s), and t_m13 runs.
+point: the driver adds /lib/agonc/libm.s), and t_m13 runs.
 
 B   the run ends with t_m13 exiting 0: every step succeeded, and a program
     built by stage 2 works, its floating point checked bit for bit.
 S2  each stage-2 program equals make cross's build of it, and so do the
-    libraries the device joined (/lib/libc.s, /lib/libm.s, /lib/libagon.s).
+    libraries the device joined (/lib/agonc/libc.s, libm.s and libagon.s).
 S3  each stage-3 program equals stage 2, and each stage-3 library unit
     equals make cross's (compare checked stage 3 against stage 2's; this
     checks it independently, on the host).
@@ -37,7 +37,7 @@ OUT = os.path.join("build", "test", "selfhost")
 ROOT = os.path.join(OUT, "root")
 CARD = os.path.join("emulator_sdcard", "selfhost")
 SCRIPTS = ["1-stage1.txt", "2-stage2.txt", "3-install.txt", "4-stage3.txt"]
-UNITS = ["ctype", "malloc", "stdio", "stdlib", "string", "exit", "time", "fp", "math", "ll", "mos"] + LIBAGON_UNITS
+UNITS = ["ctype", "malloc", "stdio", "stdlib", "string", "exit", "time", "fp", "math", "math99", "mathf", "ll", "mos"] + LIBAGON_UNITS
 PROGRAMS = ["t_exec", "t_m4", "t_m13"]
 TIMEOUT = 900                   # the whole bootstrap takes about 4 minutes at emulator speed
 
@@ -92,9 +92,9 @@ def main():
                              f"see {OUT}/bootstrap.log and {CARD})"]),
         ("S2 stage 2 equals make cross's build, the device's libc.s, libm.s and libagon.s the host's",
          sum([same(os.path.join(s2, p + ".bin"), agon(p), f"stage-2 {p}") for p in PROGS], []) +
-         same(os.path.join(CARD, "lib", "libc.s"), LIBC, "libc.s") +
-         same(os.path.join(CARD, "lib", "libm.s"), LIBM, "libm.s") +
-         same(os.path.join(CARD, "lib", "libagon.s"), LIBAGON, "libagon.s")),
+         same(os.path.join(CARD, "lib", "agonc", "libc.s"), LIBC, "libc.s") +
+         same(os.path.join(CARD, "lib", "agonc", "libm.s"), LIBM, "libm.s") +
+         same(os.path.join(CARD, "lib", "agonc", "libagon.s"), LIBAGON, "libagon.s")),
         ("S3 stage 3 equals stage 2; its library units equal make cross's",
          sum([same(os.path.join(s3, p + ".bin"), os.path.join(s2, p + ".bin"), f"stage-3 {p}") for p in PROGS], []) +
          sum([same(os.path.join(s3, u + ".s"), os.path.join(CROSS, u + ".s"), f"stage-3 {u}.s") for u in UNITS], [])),

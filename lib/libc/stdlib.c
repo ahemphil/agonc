@@ -13,6 +13,11 @@
 #include <string.h>
 #include <agon/mos.h>
 
+/* this file defines C89's strtod and atof, which the header's names mean
+ * only in strict mode, as well as C99's */
+#undef strtod
+#undef atof
+
 int errno;
 
 /* ---- number conversion ---------------------------------------------------- */
@@ -163,7 +168,7 @@ long strtol(const char *s, char **endptr, int base)
 }
 
 struct sf64;
-void __fp_strtod(const char *nptr, char **endptr, struct sf64 *r);
+void __fp_strtod(const char *nptr, char **endptr, struct sf64 *r, unsigned long *f, int c99);
 
 /* C89 4.10.1.4, correctly rounded; out of range, HUGE_VAL or 0 with errno
  * ERANGE (fp.c).
@@ -186,13 +191,44 @@ double strtod(const char *s, char **endptr)
 {
     double d;
 
-    __fp_strtod(s, endptr, (struct sf64 *)&d);
+    __fp_strtod(s, endptr, (struct sf64 *)&d, NULL, 0);
     return d;
 }
 
 double atof(const char *s)
 {
     return strtod(s, NULL);
+}
+
+/* C99's strtod and atof, which also read hexadecimal, inf and nan: what
+ * <stdlib.h> makes strtod and atof mean in the default mode. C89's own,
+ * the plain names, read "inf" as no number, as C89 requires. */
+double __strtod99(const char *s, char **endptr)
+{
+    double d;
+
+    __fp_strtod(s, endptr, (struct sf64 *)&d, NULL, 1);
+    return d;
+}
+
+double __atof99(const char *s)
+{
+    return __strtod99(s, NULL);
+}
+
+/* C99's: a float rounded once, from the text itself, not through double;
+ * and long double, which is double */
+float strtof(const char *s, char **endptr)
+{
+    float f;
+
+    __fp_strtod(s, endptr, NULL, (unsigned long *)&f, 1);
+    return f;
+}
+
+long double strtold(const char *s, char **endptr)
+{
+    return __strtod99(s, endptr);
 }
 
 /* Out of range: ULONG_MAX, with errno ERANGE. A '-' negates the value in
@@ -299,44 +335,57 @@ static void swap(char *a, char *b, size_t size)
     }
 }
 
-/* Moves base[root] down the heap of n until neither child is larger. The
- * heap is the array itself: element i's children are 2i+1 and 2i+2, and
- * no element is smaller than its children (a "max-heap"). */
-static void sift(char *base, size_t root, size_t n, size_t size, int (*cmp)(const void *, const void *))
+/* Moves the element at byte offset root down the heap that fills the
+ * first end bytes of base, until neither child is larger. The heap is the
+ * array itself: element i's children are 2i+1 and 2i+2, and no element is
+ * smaller than its children (a "max-heap"). Positions are byte offsets
+ * (element i is at i * size), so nothing here multiplies: the first child
+ * of the element at offset r, (2i+1) * size, is 2r + size, and the second
+ * is size bytes after it. (2r + size cannot wrap: r is below end, an
+ * array's size, and an array is far smaller than 2^23 bytes.) */
+static void sift(char *base, size_t root, size_t end, size_t size, int (*cmp)(const void *, const void *))
 {
     size_t child;
+    char *c;
 
     for (;;) {
-        child = 2 * root + 1;
-        if (child >= n)
+        child = root + root + size;
+        if (child >= end)
             return;
-        if (child + 1 < n && cmp(base + child * size, base + (child + 1) * size) < 0)
-            child++;
-        if (cmp(base + root * size, base + child * size) >= 0)
+        c = base + child;
+        if (child + size < end && cmp(c, c + size) < 0) {
+            child += size;
+            c += size;
+        }
+        if (cmp(base + root, c) >= 0)
             return;
-        swap(base + root * size, base + child * size, size);
+        swap(base + root, c, size);
         root = child;
     }
 }
 
 /* Heapsort: C89 names no method, and this one takes O(n log n) comparisons
- * whatever the input, no memory and no recursion. */
+ * whatever the input, no memory and no recursion. i and end are byte
+ * offsets, stepped by size, so the only multiplies are the two below. */
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *))
 {
     char *b;
+    size_t end;
     size_t i;
 
     b = base;
     if (nmemb < 2 || size == 0)
         return;
+    end = nmemb * size;
     /* build the heap bottom up: sift each element that has children,
-     * the last first, so each sift starts above two finished heaps */
-    for (i = nmemb / 2; i > 0; i--)
-        sift(b, i - 1, nmemb, size, compar);
+     * the last first, so each sift starts above two finished heaps
+     * (nmemb >> 1 is nmemb / 2, without a call to the divide helper) */
+    for (i = (nmemb >> 1) * size; i > 0; i -= size)
+        sift(b, i - size, end, size, compar);
     /* the largest is at the root: swap it to the end, shrink the heap by
      * one, and sift the new root down; the sorted tail grows leftwards */
-    for (i = nmemb - 1; i > 0; i--) {
-        swap(b, b + i * size, size);
+    for (i = end - size; i > 0; i -= size) {
+        swap(b, b + i, size);
         sift(b, 0, i, size, compar);
     }
 }

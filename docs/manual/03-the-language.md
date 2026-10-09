@@ -1,16 +1,22 @@
 # The language
 
-agonc compiles ANSI C89 (the same language as ISO C90), with its whole
-standard library, plus a few things from C99 and GCC that existing programs
-use. This chapter covers what is particular to agonc; the formal account,
-following the standard's list of implementation-defined behaviour, is
-[the language specification](../c89_spec.md).
+agonc compiles C99 as C11 left it mandatory: all of the language but
+variable-length arrays and complex numbers, which C11 made optional, with
+C99's library but for `<complex.h>`, `<fenv.h>`, `<tgmath.h>` and the wide
+characters ([The C library](05-c-library.md)). It adds a few things from
+GCC that existing programs use, and
+`-ansi` gives strict ANSI C89 (the same language as ISO C90), the
+conforming mode. This chapter covers what is particular to agonc; the
+formal account, following the standard's list of implementation-defined
+behaviour, is [the language specification](../c89_spec.md).
 
 ## The two modes
 
-By default agonc accepts some of C99 and is strict about calls to undeclared
-functions. `-ansi` (or `-std=c89`, `-std=c90`) selects strict C89, the
-conforming mode.
+By default agonc accepts C99, but for variable-length arrays and complex
+numbers, and is strict about calls to undeclared functions. `-ansi` (or
+`-std=c89`, `-std=c90`) selects strict C89, the conforming mode, for code
+that must also build with a C89 compiler. `-std=c99` and `-std=gnu99` are
+accepted and select the default mode, so makefiles written for gcc work.
 
 | | Default | Strict (`-ansi`) |
 |---|---|---|
@@ -18,10 +24,14 @@ conforming mode.
 | `long long`, `LL` and `ULL` constants | accepted | errors |
 | calling an undeclared function | an error | accepted, with a warning |
 | implicit `int` (`static x;`, `f() { ... }`) | accepted, with a warning | accepted, with a warning |
-| a declaration after a statement | accepted, with a warning | accepted, with a warning |
+| a declaration after a statement | accepted | accepted, with a warning |
+| a declaration in a `for`, `_Bool`, `inline`, `restrict`, flexible array members, hexadecimal floating constants, designated initialisers, compound literals, variadic macros, `_Pragma` | accepted | errors |
 | a comma after the last enumerator, `#warning`, non-constant initialisers for local arrays and structures | accepted | errors |
+| `__func__` | accepted | accepted |
 | trigraphs (`??=` and the rest) | ignored, with a warning | recognised |
 | `asm` | a keyword | an ordinary name; use `__asm` |
+
+C99's variable-length arrays and complex numbers are not planned.
 
 The default mode rejects calls to undeclared functions because, on this
 target, they hide real errors: a function that returns `long`, `float`,
@@ -36,6 +46,7 @@ called that way returns one of those types.
 |---|---:|---|
 | `char` | 1 | signed: −128 to 127 |
 | `unsigned char` | 1 | 0 to 255 |
+| `_Bool` (default mode) | 1 | 0 or 1 |
 | `short` | 2 | −32768 to 32767 |
 | `int` | 3 | −8388608 to 8388607 |
 | `unsigned int`, `size_t` | 3 | 0 to 16777215 |
@@ -65,9 +76,26 @@ results can be checked bit for bit against a PC.
 
 Other details: `/` truncates toward zero and `%` takes the dividend's sign;
 `>>` of a negative number shifts in sign bits; structures have **no
-padding**, so `sizeof` a structure is the sum of its members; a plain `int`
-bit-field is signed, fields fill each byte from its lowest bit, and no
-bit-field is wider than 24 bits; `register` is accepted and does nothing.
+padding**, so `sizeof` a structure is the sum of its members (a flexible
+array member adds nothing); a plain `int` bit-field is signed, fields fill
+each byte from its lowest bit, and no bit-field is wider than 24 bits (a
+`_Bool` one, 1 bit); `register` is accepted and does nothing.
+
+**C99's features** behave as C99 says, with these choices. A function
+defined `inline` is never actually inlined; for linkage, it is external if
+it is declared `extern` or the file declared it earlier without `inline`,
+and otherwise `static`, so that each file that includes a header's
+`inline` function has its own copy. `restrict` is accepted and ignored.
+Converting to `_Bool` gives 0 or 1, by comparing with 0, so `(_Bool)0.5`
+is 1, and `<stdbool.h>` defines `bool`, `true` and `false` (in strict mode
+`bool` is `int`). `_Pragma("...")` is ignored, with a warning, as `#pragma`
+is. A hexadecimal floating constant (`0x1.8p3`) is correctly rounded.
+`__STDC_VERSION__` is `199901L`, and C11's `__STDC_NO_VLA__` and
+`__STDC_NO_COMPLEX__` are 1, so that a program can tell what is missing.
+Designated initialisers may come in any order (`{ [5] = 1, [2] = 3 }`,
+`{ .y = 2, .x = 1 }`), and a later one replaces an earlier one. A compound
+literal in a function, `(struct point){ 1, 2 }`, is filled each time it is
+evaluated and lasts until the function returns.
 
 ## Floating point and long long cost time
 
@@ -94,23 +122,25 @@ only into programs that use these types.
   `__builtin_` functions (`__builtin_memcpy`, `__builtin_expect`,
   `__builtin_offsetof` and others) work.
 - **Bit-fields** of `char`, `short` and `long` type, up to 24 bits.
-- **`<stdint.h>`**, and in the default mode `long long` with its library
-  functions and `printf`'s `%lld`.
+- **C99's headers** `<stdint.h>`, `<stdbool.h>`, `<inttypes.h>` and
+  `<iso646.h>`, in both modes (strict mode without their 64-bit types and
+  functions), and in the default mode C99's additions to the library
+  ([The C library](05-c-library.md#what-is-there-from-c99)).
 - **Source files**: CR LF line endings are fine, `#include` names are not
   case-sensitive, and a `0x1A` byte ends a file (CP/M's end-of-file mark).
 - **Predefined macros**: `__AGONC__`, `__EZ80__` and `__ADL__` are 1; GCC's
   `__SIZEOF_INT__` (3), `__INT_MAX__` and the like have this target's values.
 
-Not provided, from C99 or GCC: declarations in a `for` statement,
-designated initialisers, `inline`, `_Bool`, variable-length arrays, compound
-literals, `restrict`, hexadecimal floating constants, statement
-expressions, and GCC's extended `asm` with operands.
+Not provided, from C99 or GCC: variable-length arrays, `_Complex`,
+statement expressions, and GCC's extended `asm` with operands.
 
 ## Limits
 
 The compiler's tables have fixed sizes. Each is at least what C89 requires,
-and a source that exceeds one gets a message naming the limit. The ones a
-large program may meet:
+and a source that exceeds one gets a message naming the limit. C99 raised
+most of these minimums (to 127 parameters and 4,095 characters in a string
+literal, for example), more than the Agon's memory allows the compiler, so
+agonc keeps to sizes nearer C89's. The ones a large program may meet:
 
 | Limit | agonc |
 |---|---:|
@@ -124,6 +154,7 @@ large program may meet:
 | members of all structures and unions in one file, together | 800 |
 | constants in one enumeration | 127 |
 | characters in one string literal, after joining adjacent ones | 509 |
+| items of an initialiser that a designator may go back over | 512 |
 | characters in a logical source line | 4,096 |
 | nesting of `#include` | 8 |
 | nesting of `#if` | 32 |

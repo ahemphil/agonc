@@ -28,27 +28,33 @@ echo The C library (11 units)
 /bin/agonc/cpp /agonc/lib/libc/math.c /agonc/out/math.i
 /bin/agonc/cc1 /agonc/out/math.i /agonc/out/math.ir -u math.c -Werror
 /bin/agonc/cc2 /agonc/out/math.ir /agonc/out/math.s -O
+/bin/agonc/cpp /agonc/lib/libc/math99.c /agonc/out/math99.i
+/bin/agonc/cc1 /agonc/out/math99.i /agonc/out/math99.ir -u math99.c -Werror
+/bin/agonc/cc2 /agonc/out/math99.ir /agonc/out/math99.s -O
+/bin/agonc/cpp /agonc/lib/libc/mathf.c /agonc/out/mathf.i
+/bin/agonc/cc1 /agonc/out/mathf.i /agonc/out/mathf.ir -u mathf.c -Werror
+/bin/agonc/cc2 /agonc/out/mathf.ir /agonc/out/mathf.s -O
 /bin/agonc/cpp /agonc/lib/libc/ll.c /agonc/out/ll.i
 /bin/agonc/cc1 /agonc/out/ll.i /agonc/out/ll.ir -u ll.c -Werror
 /bin/agonc/cc2 /agonc/out/ll.ir /agonc/out/ll.s -O
 /bin/agonc/cpp /agonc/lib/agon/mos.c /agonc/out/mos.i
 /bin/agonc/cc1 /agonc/out/mos.i /agonc/out/mos.ir -u mos.c -Werror
 /bin/agonc/cc2 /agonc/out/mos.ir /agonc/out/mos.s -O
-echo concat, which joins the library's units into /lib/libc.s and /lib/libm.s
+echo concat, which joins the library's units into /lib/agonc/libc.s and /lib/agonc/libm.s
 /bin/agonc/cpp /agonc/tools/concat.c /agonc/out/concat.i
 /bin/agonc/cc1 /agonc/out/concat.i /agonc/out/concat.ir -u concat.c -Werror
 /bin/agonc/cc2 /agonc/out/concat.ir /agonc/out/concat.s -O
-/bin/agonc/ld -o /agonc/out/concat.asm /lib/crt0.s /lib/rt.s /agonc/out/concat.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/mos.s
+/bin/agonc/ld -o /agonc/out/concat.asm /lib/agonc/crt0.s /lib/agonc/rt.s /agonc/out/concat.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/mos.s
 ez80asm /agonc/out/concat.asm /bin/concat.bin -m
-concat /lib/libc.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/time.s /agonc/out/mos.s
-concat /lib/libm.s /agonc/out/fp.s /agonc/out/math.s /agonc/out/ll.s
+concat /lib/agonc/libc.s /agonc/out/ctype.s /agonc/out/malloc.s /agonc/out/stdio.s /agonc/out/stdlib.s /agonc/out/string.s /agonc/out/exit.s /agonc/out/time.s /agonc/out/mos.s
+concat /lib/agonc/libm.s /agonc/out/fp.s /agonc/out/math.s /agonc/out/math99.s /agonc/out/mathf.s /agonc/out/ll.s
 echo the libraries' indexes, which links read instead of the whole library
-/bin/agonc/ld --index /lib/crt0.s /lib/rt.s /lib/libc.s /lib/libm.s
+/bin/agonc/ld --index /lib/agonc/crt0.s /lib/agonc/rt.s /lib/agonc/libc.s /lib/agonc/libm.s
 echo compare, which checks two files are identical
 /bin/agonc/cpp /agonc/tools/compare.c /agonc/out/compare.i
 /bin/agonc/cc1 /agonc/out/compare.i /agonc/out/compare.ir -u compare.c -Werror
 /bin/agonc/cc2 /agonc/out/compare.ir /agonc/out/compare.s -O
-/bin/agonc/ld -o /agonc/out/compare.asm /lib/crt0.s /lib/rt.s /agonc/out/compare.s /lib/libc.s
+/bin/agonc/ld -o /agonc/out/compare.asm /lib/agonc/crt0.s /lib/agonc/rt.s /agonc/out/compare.s /lib/agonc/libc.s
 ez80asm /agonc/out/compare.asm /bin/compare.bin -m
 echo The driver, agonc, as a moslet
 /bin/agonc/cpp /agonc/src/agonc/agonc.c /agonc/out/agonc.i
@@ -57,6 +63,6 @@ echo The driver, agonc, as a moslet
 /bin/agonc/cpp /agonc/src/agonc/sys.c /agonc/out/sys.i
 /bin/agonc/cc1 /agonc/out/sys.i /agonc/out/sys.ir -u sys.c -Werror
 /bin/agonc/cc2 /agonc/out/sys.ir /agonc/out/sys.s -O
-/bin/agonc/ld -o /agonc/out/agonc.asm --moslet /lib/crt0.s /lib/rt.s /agonc/out/agonc.s /agonc/out/sys.s /lib/libc.s
+/bin/agonc/ld -o /agonc/out/agonc.asm --moslet /lib/agonc/crt0.s /lib/agonc/rt.s /agonc/out/agonc.s /agonc/out/sys.s /lib/agonc/libc.s
 ez80asm /agonc/out/agonc.asm /mos/agonc.bin -m
 echo 1-stage1 finished. Next: exec /agonc/bootstrap/2-stage2.txt

@@ -14,8 +14,9 @@ use fread, as rd.c and args.c do), for lines over 250 characters, and for printf
 formats our C library does not implement. In lib/ as well: no #asm/#endasm
 (our own sources use asm("...") where assembly is unavoidable; #asm is for
 users' programs), except in the assembly branch of an `#if NAME_ASM` group
-(FP_ASM, I64_ASM) that has an `#else` with the same code in C: assembly
-only beside a working C version (softfp.c's and int64.c's kernels). Then
+(FP_ASM, I64_ASM, STR_ASM) that has an `#else` with the same code in C:
+assembly only beside a working C version (softfp.c's and int64.c's
+kernels, string.c's busiest functions). Then
 bootstrap/*.rsp against the source folders. Exit status 0 if nothing was
 found.
 """

@@ -131,8 +131,8 @@ __start:
         ; Registers through the loop: B = argc so far, IX = the address of
         ; the next free argv slot, HL = the cursor in the string. The
         ; entries after argv[argc - 1] read as null because step 3 zeroed
-        ; the table; when all 32 are used, the table holds no null entry
-        ; after them.
+        ; the table, whose 33rd slot is never filled: argv[argc] is null
+        ; even when all 32 are used, as C requires.
         ld      hl, __argv0
         ld      (__argv), hl
         ld      b, 1                    ; argc so far (argv[0] filled);
@@ -318,11 +318,11 @@ ___intflag:
 __argv0:
         db      0
 
-;;sect bss __argv g 96
+;;sect bss __argv g 99
 ; argv[] table: up to 32 entries (MAXARGV per abi.md/driver.md), 3 bytes
-; (one address) each. Zeroed by step 3 before step 4 fills in the entries
-; actually used, so any unused trailing entry reads as a null pointer
-; (with all 32 used, argv[argc] lies past the table's 96 bytes).
+; (one address) each, and a 33rd that stays null, so argv[argc] is null
+; however many are used. Zeroed by step 3 before step 4 fills in the
+; entries actually used.
 ; (No body: a bss section is declared by its marker alone.)
 
 ;;end

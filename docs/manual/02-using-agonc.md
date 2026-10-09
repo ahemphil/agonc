@@ -34,13 +34,14 @@ name given with `-o`. `agonc -h` lists the options.
 | `-lname` | link the library `libname.s` |
 | `-lm` | link the floating-point library even if agonc does not see it is needed |
 | `-ansi`, `-std=c89`, `-std=c90` | strict C89 ([The language](03-the-language.md#the-two-modes)) |
+| `-std=c99`, `-std=gnu99` | the default mode, C99; the last of these and `-ansi` wins |
 | `-w` | no warnings |
 | `-Werror` | warnings count as errors |
 | `-Wall` | all warnings, which is the default anyway |
 | `-O0` | no optimisation |
 | `-O`, `-O1`, `-O2`, `-O3`, `-Os` | optimise, which is the default; all the same |
 | `-nostdlib` | no start-up code and no libraries: for programs that supply their own |
-| `-save-temps` | keep the intermediate files in `/tmp` |
+| `-save-temps` | keep the intermediate files in `/tmp/agonc` |
 | `-Wl,option` | pass `option` to the linker; `-Wl,--entry=sym` keeps `sym` and what it uses |
 | `--index lib.s` | index a library, so that links using it are faster ([Libraries](#libraries)) |
 | `-time` | show how long each pass took, and the total |
@@ -89,19 +90,20 @@ agonc finds its own files in fixed places on the SD card:
 | `/mos` | `agonc.bin` | the command |
 | `/bin/agonc` | `cpp.bin`, `cc1.bin`, `cc2.bin`, `ld.bin` | the passes |
 | `/bin` | `ez80asm.bin` | the assembler |
-| `/lib` | the C headers, `crt0.s`, `rt.s`, `libc.s`, `libm.s`, `libagon.s`, and their `.idx` indexes | the standard library |
-| `/lib/agon` | `mos.h`, `uart.h`, `vdp.h` | `#include <agon/vdp.h>` and the others |
+| `/lib/agonc` | the C headers, `crt0.s`, `rt.s`, `libc.s`, `libm.s`, `libagon.s`, and their `.idx` indexes | the standard library |
+| `/lib/agonc/agon` | `mos.h`, `uart.h`, `vdp.h` | `#include <agon/vdp.h>` and the others |
 | `/usrlib` | your libraries | `#include` and `-l` |
-| `/tmp` | intermediate files | created if missing |
+| `/tmp/agonc` | intermediate files | created if missing |
 
 `#include <name>` searches the `-I` folders in order, then `/usrlib`, then
-`/lib`. `#include "name"` first searches the folder of the file that
+`/lib/agonc`. `#include "name"` first searches the folder of the file that
 includes it, then the same places. File names are not case-sensitive, as
 on the card itself.
 
 The intermediate files of a compile (`name.i`, `name.ir`, `name.s` and the
-linked `out.asm`) go in `/tmp` and are deleted after a successful build,
-unless `-save-temps` keeps them. Looking at `/tmp/name.s` is the easiest way
+linked `out.asm`) go in `/tmp/agonc` and are deleted after a successful
+build, unless `-save-temps` keeps them. Looking at `/tmp/agonc/name.s` is the
+easiest way
 to see the code agonc generates for a function.
 
 ## Libraries

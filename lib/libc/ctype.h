@@ -19,5 +19,8 @@ int isgraph(int c);
 int ispunct(int c);
 int toupper(int c);
 int tolower(int c);
+#if !defined(__STRICT_ANSI__)
+int isblank(int c);
+#endif
 
 #endif

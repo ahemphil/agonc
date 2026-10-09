@@ -5,7 +5,9 @@
  * Notes for programs: the heap grows up from the program's end towards
  * the stack and never within 256 bytes of it; malloc(0) returns a unique
  * pointer. atexit holds 32 functions. rand is C89's example generator.
- * qsort is a heapsort (not stable). strtod is correctly rounded. getenv
+ * qsort is a heapsort (not stable). strtod and C99's strtof are correctly
+ * rounded, and outside strict mode read C99's hexadecimal, inf and nan
+ * forms too. getenv
  * reads MOS 3's system variables (always NULL on MOS 2). system runs a
  * MOS command or moslet, not a program in /bin. */
 
@@ -78,6 +80,15 @@ size_t mbstowcs(wchar_t *pwcs, const char *s, size_t n);
 size_t wcstombs(char *s, const wchar_t *pwcs, size_t n);
 
 #if !defined(__STRICT_ANSI__)
+/* C99's strtod and atof, which read hexadecimal, inf and nan as well:
+ * the plain names are C89's, which strict mode keeps */
+double __strtod99(const char *s, char **endptr);
+double __atof99(const char *s);
+#define strtod __strtod99
+#define atof __atof99
+void _Exit(int status);
+float strtof(const char *s, char **endptr);
+long double strtold(const char *s, char **endptr);
 long long llabs(long long n);
 long long atoll(const char *s);
 long long strtoll(const char *s, char **endptr, int base);

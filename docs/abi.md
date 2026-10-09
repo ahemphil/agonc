@@ -19,6 +19,7 @@ linker (`ld`). Anything not stated here is not promised.
 
 | Type | Size | Representation |
 |---|---|---|
+| `_Bool` | 1 | 0 or 1 (C99's; not in strict mode) |
 | `char` | 1 | **signed**, two's complement (matches AgDev) |
 | `signed char` | 1 | as `char`, but a distinct type |
 | `unsigned char` | 1 | 0..255 |
@@ -249,6 +250,18 @@ contracts:
 32-bit helpers clobber `A`, `F`, `BC`, `D`, `IY` and return `E:UHL`. Both
 preserve `IX` and `SP` and take no stack arguments.
 
+The multiply and divide helpers keep their working values in registers
+and on the stack, so they are reentrant: an interrupt handler written in C
+may multiply or divide while the main program is inside one. The shifts
+and sign extensions keep values in fixed bss cells, which
+`lib/agon/kbint.s`'s `__handler_call` saves around a C handler, as it saves
+the alternate registers, which the `long long` division uses. Division by
+zero, which C leaves undefined, never faults: `__idivu` gives the quotient
+0xFFFFFF and the dividend as the remainder, the 32-bit division some
+value, and the `long long` division a quotient of 0. `lib/rt/rt_ref.c` is
+the C of the multiply and divide helpers, by the same steps; the tests
+check the helpers against it.
+
 The floating-point helpers are C functions in the library (`fp.c`, in
 `libm.s`), called by the C convention (§4) and clobbering what any C
 function may.
@@ -379,7 +392,8 @@ string, `SP` in MOS's 2 KB system stack:
 3. Zero `__bss_size` bytes at `__bss_base` (skipped when zero).
 4. Split the argument string **in place** into `__argv[]` (up to 32
    entries; extra tokens are dropped), with `argv[0]` a fixed empty string;
-   `argc` counts it. Tokens are separated by runs of spaces and tabs.
+   `argc` counts it, and `argv[argc]` is a null pointer (the table has a
+   33rd slot for it). Tokens are separated by runs of spaces and tabs.
    A token that starts with a double quote runs to the next one, spaces
    included, and both quotes are removed (`""` is an empty argument; a
    token with no closing quote runs to the end of the line); a quote inside

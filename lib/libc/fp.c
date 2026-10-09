@@ -55,6 +55,10 @@
 #define sf32_to_long64 __sf32_to_long64
 #define sf64_from_decimal __sf64_from_decimal
 #define sf32_from_decimal __sf32_from_decimal
+#define sf64_from_hex __sf64_from_hex
+#define sf64_fma __sf64_fma
+#define SOFTFP_FMA 1
+#define sf32_from_hex __sf32_from_hex
 #define sf64_to_decimal __sf64_to_decimal
 
 #include "../../src/cc1/softfp.c"
@@ -392,9 +396,71 @@ struct q *__dtouq(struct q *r, const struct sf64 *a)
  * a constant's as parse reads them (one more, standing for any beyond). */
 static char fp_buf[DIG_MAX + 1];
 
+/* What parse read besides a decimal constant (C99's forms): a
+ * hexadecimal one, whose first 16 significant digits make hex_hi:hex_lo
+ * (the rest only hex_sticky, if any is not 0), an infinity or a NaN. */
+#define K_DEC 0
+#define K_HEX 1
+#define K_INF 2
+#define K_NAN 3
+static int fp_kind;
+static unsigned long hex_hi;
+static unsigned long hex_lo;
+static int hex_sticky;
+
+static int hex_value(int c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/* After a sign: inf or infinity, or nan with an optional (letters,
+ * digits and '_'), any case (C99 7.20.1.3), c the first letter, n the
+ * characters read so far. As for parse; *good marks "inf", "infinity",
+ * "nan" and "nan(...)" as complete. */
+static int parse_word(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int *good, int n,
+                      int c)
+{
+    char *word;
+    int i;
+
+    word = (c | 32) == 'i' ? "infinity" : "nan";
+    fp_kind = word[0] == 'i' ? K_INF : K_NAN;
+    for (i = 0; word[i] != 0 && n < width && (c | 32) == word[i]; i++) {
+        n++;
+        c = get(src);
+        if (i == 2 || i == 7)
+            *good = n;
+    }
+    if (fp_kind == K_NAN && *good > 0 && n < width && c == '(') {
+        n++;
+        c = get(src);
+        while (n < width && (hex_value(c) >= 0 || ((c | 32) >= 'a' && (c | 32) <= 'z') || c == '_')) {
+            n++;
+            c = get(src);
+        }
+        if (n < width && c == ')') {
+            n++;
+            *good = n;
+            c = get(src);
+        }
+    }
+    unget(src, c);
+    return n;
+}
+
 /* A floating constant as strtod and scanf read it (C89 4.10.1.4): a sign,
  * digits with at most one '.', then e or E, a sign and digits, at most
- * width characters from get, the character after them given back. The
+ * width characters from get, the character after them given back; or,
+ * if c99, C99's forms too (fp_kind says which): after the sign, 0x and
+ * hex digits with at most one '.', then an optional p or P, a sign and
+ * decimal digits, the power of two, which *exp10 holds; or parse_word's.
+ * C89 has none of them: its strtod reads "inf" as no number at all. The
  * digits go to fp_buf without the leading zeros (past DIG_MAX + 1, only
  * whether any is nonzero is kept), so that the value is fp_buf's integer
  * times 10^*exp10. Returns the characters consumed; *good is the number
@@ -412,10 +478,11 @@ static char fp_buf[DIG_MAX + 1];
  * once it reaches 100000, far beyond any double's range, so it cannot
  * overflow a long. */
 static int parse(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int *good, int *nd,
-                 long *exp10, int *neg)
+                 long *exp10, int *neg, int c99)
 {
     int n;
     int c;
+    int d;
     int any;
     int point;
     int eneg;
@@ -428,13 +495,64 @@ static int parse(int (*get)(void *), void (*unget)(void *, int), void *src, int 
     *neg = 0;
     any = 0;
     point = 0;
+    fp_kind = K_DEC;
     c = get(src);
     if (c == '+' || c == '-') {
         *neg = c == '-';
         n++;
         c = get(src);
     }
-    while (n < width) {
+    if (c99 && n < width && ((c | 32) == 'i' || (c | 32) == 'n'))
+        return parse_word(get, unget, src, width, good, n, c);
+    if (c99 && n < width && c == '0') {
+        any = 1;                        /* "0" is complete, whatever follows */
+        n++;
+        *good = n;
+        c = get(src);
+        if (n < width && (c | 32) == 'x') {
+            /* each of the first 16 significant digits goes into the
+             * integer hex_hi:hex_lo; a digit after the point divides by
+             * 16, a dropped one before it multiplies by 16 */
+            fp_kind = K_HEX;
+            hex_hi = 0;
+            hex_lo = 0;
+            hex_sticky = 0;
+            any = 0;
+            n++;
+            c = get(src);
+            while (n < width) {
+                d = hex_value(c);
+                if (d >= 0) {
+                    any = 1;
+                    if (*nd < 16) {
+                        if (*nd > 0 || d != 0) {
+                            hex_hi = (hex_hi << 4 | hex_lo >> 28) & 0xFFFFFFFFUL;
+                            hex_lo = (hex_lo << 4 & 0xFFFFFFFFUL) | d;
+                            (*nd)++;
+                        }
+                        if (point)
+                            *exp10 = *exp10 - 4;
+                    } else {
+                        if (d != 0)
+                            hex_sticky = 1;
+                        if (!point)
+                            *exp10 = *exp10 + 4;
+                    }
+                } else if (c == '.' && !point) {
+                    point = 1;
+                } else {
+                    break;
+                }
+                n++;
+                c = get(src);
+                if (any)
+                    *good = n;
+            }
+            if (!any)
+                fp_kind = K_DEC;        /* only the "0" before the x */
+        }
+    }
+    while (fp_kind == K_DEC && n < width) {
         if (c >= '0' && c <= '9') {
             any = 1;
             if (c != '0' || *nd > 0) {
@@ -463,8 +581,8 @@ static int parse(int (*get)(void *), void (*unget)(void *, int), void *src, int 
             *good = n;
     }
     /* the exponent part; e stays -1 until a digit comes, and only then
-     * does *good move past the 'e' */
-    if (any && n < width && (c == 'e' || c == 'E')) {
+     * does *good move past the 'e' (or p) */
+    if (any && n < width && (c | 32) == (fp_kind == K_HEX ? 'p' : 'e')) {
         n++;
         c = get(src);
         eneg = 0;
@@ -490,10 +608,44 @@ static int parse(int (*get)(void *), void (*unget)(void *, int), void *src, int 
     return n;
 }
 
-/* scanf's e f g E G (stdio.c reaches this through a weak reference): 1 if
- * a whole constant was read, stored to dest (a double for size 'l' or 'L',
- * else a float, rounded from the decimal itself) unless dest is null. */
-int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int size, void *dest)
+/* What parse read, as a double or as a float's bits, each rounded once
+ * from the constant itself. */
+static void double_of(struct sf64 *r, int nd, long exp10, int neg)
+{
+    r->lo = 0;
+    if (fp_kind == K_INF)
+        r->hi = 0x7FF00000UL;
+    else if (fp_kind == K_NAN)
+        r->hi = DEFAULT_NAN_HI;
+    else if (fp_kind == K_HEX)
+        sf64_from_hex(r, hex_hi, hex_lo, hex_sticky, exp10);
+    else
+        sf64_from_decimal(r, 0, fp_buf, nd, exp10);
+    if (neg)
+        r->hi = r->hi | 0x80000000UL;
+}
+
+static unsigned long float_of(int nd, long exp10, int neg)
+{
+    unsigned long f;
+
+    if (fp_kind == K_INF)
+        f = 0x7F800000UL;
+    else if (fp_kind == K_NAN)
+        f = 0x7FC00000UL;
+    else if (fp_kind == K_HEX)
+        f = sf32_from_hex(hex_hi, hex_lo, hex_sticky, exp10);
+    else
+        f = sf32_from_decimal(0, fp_buf, nd, exp10);
+    return neg ? f | 0x80000000UL : f;
+}
+
+/* scanf's e f g a E F G A (stdio.c reaches this through a weak
+ * reference): 1 if a whole constant was read, stored to dest (a double
+ * for size 'l' or 'L', else a float, rounded from the constant itself)
+ * unless dest is null. c99: C99's forms are read too. */
+int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int size, void *dest,
+              int c99)
 {
     int n;
     int good;
@@ -501,7 +653,7 @@ int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int wid
     int neg;
     long exp10;
 
-    n = parse(get, unget, src, width, &good, &nd, &exp10, &neg);
+    n = parse(get, unget, src, width, &good, &nd, &exp10, &neg, c99);
     /* characters read past the end of a complete constant ("1e") are a
      * matching failure, as C has it: the input item is "1e", which is no
      * number, and a stream cannot take back more than one character */
@@ -509,9 +661,9 @@ int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int wid
         return 0;
     if (dest != NULL) {
         if (size == 'l' || size == 'L')
-            sf64_from_decimal((struct sf64 *)dest, neg, fp_buf, nd, exp10);
+            double_of((struct sf64 *)dest, nd, exp10, neg);
         else
-            *(unsigned long *)dest = sf32_from_decimal(neg, fp_buf, nd, exp10);
+            *(unsigned long *)dest = float_of(nd, exp10, neg);
     }
     return 1;
 }
@@ -540,13 +692,14 @@ static void str_unget(void *src, int c)
         (*p)--;
 }
 
-/* strtod (C89 4.10.1.4): the value to *r; out of range, HUGE_VAL (an
- * infinity) or 0 with errno ERANGE. stdlib.c's strtod calls this, with r
- * its double's address. Leading white space is skipped here, as parse
- * does not; width 32767 is "no limit". A result that rounds to infinity
- * or to zero from nonzero digits (nd > 0) is the range error; a result
- * that underflows only to a subnormal is not reported. */
-void __fp_strtod(const char *nptr, char **endptr, struct sf64 *r)
+/* strtod (C89 4.10.1.4, and with c99 C99's forms), or with r null C99's
+ * strtof, whose float's bits go to *f: the value; out of range, HUGE_VAL
+ * (an infinity) or 0 with errno ERANGE. stdlib.c's strtod and strtof call
+ * this. Leading white space is skipped here, as parse does not; width
+ * 32767 is "no limit". A result that rounds to infinity or to zero from
+ * nonzero digits (nd > 0) is the range error; a result that underflows
+ * only to a subnormal is not reported. */
+void __fp_strtod(const char *nptr, char **endptr, struct sf64 *r, unsigned long *f, int c99)
 {
     const char *s;
     const char *p;
@@ -554,24 +707,43 @@ void __fp_strtod(const char *nptr, char **endptr, struct sf64 *r)
     int nd;
     int neg;
     long exp10;
+    unsigned long hi;
+    unsigned long lo;
 
     s = nptr;
     while (*s == ' ' || (*s >= 9 && *s <= 13))
         s++;
     p = s;
-    parse(str_get, str_unget, &p, 32767, &good, &nd, &exp10, &neg);
-    r->lo = 0;
-    r->hi = 0;
+    parse(str_get, str_unget, &p, 32767, &good, &nd, &exp10, &neg, c99);
+    hi = 0;
+    lo = 0;
     if (good == 0) {
         if (endptr != NULL)
             *endptr = (char *)nptr;     /* no conversion */
     } else {
-        /* the exponent is part of the constant only if good reached it */
+        /* the exponent is part of the constant only if good reached it;
+         * a hexadecimal one's digits stop where good does, so they hold
+         * no digit beyond it */
         if (endptr != NULL)
             *endptr = (char *)s + good;
-        sf64_from_decimal(r, neg, fp_buf, nd, exp10);
-        if (nd > 0 && ((r->hi & 0x7FFFFFFFUL) == 0x7FF00000UL || ((r->hi & 0x7FFFFFFFUL) == 0 && r->lo == 0)))
+        if (r != NULL) {
+            double_of(r, nd, exp10, neg);
+            hi = r->hi & 0x7FFFFFFFUL;
+            lo = r->lo;
+        } else {
+            *f = float_of(nd, exp10, neg);
+            hi = *f & 0x7FFFFFFFUL;
+            hi = hi == 0x7F800000UL ? 0x7FF00000UL : hi;
+        }
+        if (nd > 0 && (hi == 0x7FF00000UL || (hi == 0 && lo == 0)))
             errno = ERANGE;
+        return;
+    }
+    if (r != NULL) {
+        r->lo = 0;
+        r->hi = 0;
+    } else {
+        *f = 0;
     }
 }
 
@@ -592,11 +764,99 @@ static void out_n(void (*out)(void *, int), void *k, int c, int n)
     }
 }
 
-/* printf's e f g E F G (C89 4.9.6.1; stdio.c reaches this through a weak
- * reference): the double at d, each character through out(k, c). plus
- * is the sign a positive value takes (0, '+' or ' '), alt the '#' flag,
- * prec -1 for the default. An infinity prints as inf and a NaN as nan
- * (INF and NAN for the capital conversions).
+/* %a and %A (C99 7.19.6.1): finite v, its sign already taken off, as
+ * 0xh.hhhp+d, the leading digit 1 for a normal number and 0 for a
+ * subnormal or zero (whose exponent is then -1022, or 0 for zero). The
+ * digits are v's bits, so with no precision the fraction is exact,
+ * trailing zeros dropped; a precision rounds it to that many digits, to
+ * nearest even, which may carry the leading digit to 2 (as glibc does). */
+static void hex_print(void (*out)(void *, int), void *k, const struct sf64 *v, int upper, int sign, int alt,
+                      int left, int zero, int width, int prec)
+{
+    char hd[14];        /* the leading digit, then the 13 fraction digits */
+    char edig[6];
+    char *set;
+    int ex;
+    int e;
+    int i;
+    int nf;
+    int up;
+    int ne;
+    int len;
+    int point;
+
+    set = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+    ex = (int)(v->hi >> 20);
+    hd[0] = ex != 0;
+    for (i = 1; i <= 5; i++)
+        hd[i] = (char)(v->hi >> (20 - 4 * i) & 15);
+    for (i = 6; i <= 13; i++)
+        hd[i] = (char)(v->lo >> (52 - 4 * i) & 15);
+    if (ex == 0)
+        ex = (v->hi | v->lo) == 0 ? 0 : -1022;
+    else
+        ex = ex - 1023;
+    if (prec < 0) {
+        nf = 13;
+        while (nf > 0 && hd[nf] == 0)
+            nf--;
+    } else {
+        nf = prec;
+        if (nf < 13) {
+            /* the digits after the last kept against half (8, then 0s) */
+            up = hd[nf + 1] > 8;
+            if (hd[nf + 1] == 8) {
+                up = hd[nf] & 1;        /* a tie: to even */
+                for (i = nf + 2; i <= 13; i++)
+                    if (hd[i] != 0)
+                        up = 1;
+            }
+            for (i = nf; up && i >= 0; i--) {
+                hd[i]++;
+                up = hd[i] == 16 && i > 0;
+                if (up)
+                    hd[i] = 0;
+            }
+        }
+    }
+    e = ex < 0 ? -ex : ex;
+    ne = 0;
+    do {
+        edig[ne] = (char)('0' + e % 10);
+        ne++;
+        e = e / 10;
+    } while (e != 0);
+    point = nf > 0 || alt;
+    len = (sign != 0) + 3 + point + nf + 2 + ne;        /* 0x, the leading digit; p and the sign */
+    if (!left && !zero)
+        out_n(out, k, ' ', width - len);
+    if (sign)
+        out(k, sign);
+    out(k, '0');
+    out(k, upper ? 'X' : 'x');
+    if (!left && zero)
+        out_n(out, k, '0', width - len);
+    out(k, set[(int)hd[0]]);
+    if (point)
+        out(k, '.');
+    for (i = 1; i <= nf; i++)
+        out(k, i <= 13 ? set[(int)hd[i]] : '0');
+    out(k, upper ? 'P' : 'p');
+    out(k, ex < 0 ? '-' : '+');
+    while (ne > 0) {
+        ne--;
+        out(k, edig[ne]);
+    }
+    if (left)
+        out_n(out, k, ' ', width - len);
+}
+
+/* printf's e f g E F G, and a A through hex_print (C89 4.9.6.1, C99
+ * 7.19.6.1; stdio.c reaches this through a weak reference): the double
+ * at d, each character through out(k, c). plus is the sign a positive
+ * value takes (0, '+' or ' '), alt the '#' flag, prec -1 for the
+ * default. An infinity prints as inf and a NaN as nan (INF and NAN for
+ * the capital conversions).
  *
  * The steps: the sign comes off and |v| is converted to digits
  * (d1 d2 ... times 10^dexp) by sf64_to_decimal, already rounded to the
@@ -625,7 +885,7 @@ void __fp_print(void (*out)(void *, int), void *k, const void *d, int conv, int 
     int ne;
 
     v = *(const struct sf64 *)d;
-    upper = conv == 'E' || conv == 'F' || conv == 'G';
+    upper = conv == 'E' || conv == 'F' || conv == 'G' || conv == 'A';
     if (upper)
         conv = conv - 'A' + 'a';
     sign = v.hi & 0x80000000UL ? '-' : plus;
@@ -641,6 +901,10 @@ void __fp_print(void (*out)(void *, int), void *k, const void *d, int conv, int 
             out(k, s[i]);
         if (left)
             out_n(out, k, ' ', width - len);
+        return;
+    }
+    if (conv == 'a') {
+        hex_print(out, k, &v, upper, sign, alt, left, zero, width, prec);
         return;
     }
     if (prec < 0)

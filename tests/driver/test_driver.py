@@ -94,14 +94,14 @@ def exists(path):
 
 
 def tmp_files():
-    return sorted(os.listdir(os.path.join(REPO, ROOT, "tmp")))
+    return sorted(os.listdir(os.path.join(REPO, ROOT, "tmp", "agonc")))
 
 
 def by_hand(src, stem):
     """cpp, cc1, cc2, ld and ez80asm run directly, as the driver should."""
-    lib = os.path.join(ROOT, "lib")
+    lib = os.path.join(ROOT, "lib", "agonc")
     # the include paths spelled as the driver spells them: they reach the .i's line markers
-    for cmd in ([os.path.join(HOST, "cpp.exe"), src, o(stem + ".i"), "-I" + ROOT + "/usrlib", "-I" + ROOT + "/lib"],
+    for cmd in ([os.path.join(HOST, "cpp.exe"), src, o(stem + ".i"), "-I" + ROOT + "/usrlib", "-I" + ROOT + "/lib/agonc"],
                 [os.path.join(HOST, "cc1.exe"), o(stem + ".i"), o(stem + ".ir"), "-u", os.path.basename(src)],
                 [os.path.join(HOST, "cc2.exe"), o(stem + ".ir"), o(stem + ".s"), "-O"],
                 [os.path.join(HOST, "ld.exe"), "-o", o(stem + ".asm"), os.path.join(lib, "crt0.s"),
@@ -176,7 +176,7 @@ def h3():
     if kept != want:
         problems.append(f"-save-temps kept {kept}, expected {want} (and any .rsp)")
     for f in tmp_files():
-        os.remove(os.path.join(REPO, ROOT, "tmp", f))
+        os.remove(os.path.join(REPO, ROOT, "tmp", "agonc", f))
     return problems
 
 
@@ -222,7 +222,7 @@ def h4():
     for src, extra, want in ((t("hello.c"), (), 0), (o("fp.c"), (), 1), (o("fp.c"), ("-lm",), 1), (o("ll.c"), (), 1)):
         r = agonc("-v", "-save-temps", "-o", o("fp.bin"), src, *extra)
         problems += expect_ok(r, f"{os.path.basename(src)} {' '.join(extra)}")
-        rsp = (read(os.path.join(ROOT, "tmp", "ld.rsp")) or b"").decode() + \
+        rsp = (read(os.path.join(ROOT, "tmp", "agonc", "ld.rsp")) or b"").decode() + \
             "".join(line for line in r.stdout.splitlines() if "ld.exe " in line)
         if "crt0.s" not in rsp:
             problems.append(f"{os.path.basename(src)}: ld's arguments not found")
@@ -230,7 +230,7 @@ def h4():
             problems.append(f"{os.path.basename(src)} {' '.join(extra)}: libm.s linked {rsp.count('libm.s')} times, "
                             f"expected {want}")
         for f in tmp_files():
-            os.remove(os.path.join(REPO, ROOT, "tmp", f))
+            os.remove(os.path.join(REPO, ROOT, "tmp", "agonc", f))
     r = agonc("-o", o("w.bin"), o("warn.c"))
     if r.returncode or "control reaches the end" not in r.stderr:
         problems.append(f"warn.c: status {r.returncode}, expected 0 and a warning")
@@ -249,6 +249,15 @@ def h4():
     r = agonc("-ansi", "-o", o("impl.bin"), o("impl.c"))
     if r.returncode or "implicit declaration of function f" not in r.stderr:
         problems.append(f"implicit call, -ansi: status {r.returncode}, stderr {r.stderr.strip()!r}")
+    # -std=c99 and -std=gnu99 select the default mode, overriding an
+    # earlier -ansi (the last one wins)
+    for std in ("-std=c99", "-std=gnu99"):
+        r = agonc("-ansi", std, "-o", o("impl.bin"), o("impl.c"))
+        if r.returncode != 200 or "call to undeclared function f" not in r.stderr:
+            problems.append(f"implicit call, -ansi {std}: status {r.returncode}, stderr {r.stderr.strip()!r}")
+    r = agonc("-std=c99", "-ansi", "-o", o("impl.bin"), o("impl.c"))
+    if r.returncode or "implicit declaration of function f" not in r.stderr:
+        problems.append(f"implicit call, -std=c99 -ansi: status {r.returncode}, stderr {r.stderr.strip()!r}")
     open(os.path.join(REPO, o("impl2.c")), "w").write("int main(void) { return (int)f(); }\nlong f(void) { return 0; }\n")
     r = agonc("-std=c89", "-c", "-o", o("impl2a.s"), o("impl2.c"))
     if r.returncode != 200 or "conflicting types for f" not in r.stderr:
@@ -264,7 +273,7 @@ def h4():
     defs = [f"-DUNUSED_MACRO_{i}=1" for i in range(30)]
     r = agonc("-v", "-o", o("many.bin"), *defs, t("hello.c"))
     problems += expect_ok(r, "30 -D options")
-    if "@" + os.path.join(ROOT, "tmp", "cpp.rsp").replace("\\", "/") not in r.stdout.replace("\\", "/"):
+    if "@" + os.path.join(ROOT, "tmp", "agonc", "cpp.rsp").replace("\\", "/") not in r.stdout.replace("\\", "/"):
         problems.append("30 -D options: cpp was not given a response file")
     problems += same(o("many.bin"), o("hand.bin"), "30 -D options")
     return problems
@@ -313,7 +322,7 @@ def h7():
 
 def h5():
     problems = []
-    lib = os.path.join(ROOT, "lib")
+    lib = os.path.join(ROOT, "lib", "agonc")
     problems += expect_ok(agonc("-nostdlib", "-o", o("nostd.bin"), os.path.join(lib, "crt0.s"),
                                 os.path.join(lib, "rt.s"), t("hello.c"), os.path.join(lib, "libc.s")), "-nostdlib")
     problems += same(o("nostd.bin"), o("hand.bin"), "-nostdlib with the runtime named")
@@ -329,11 +338,11 @@ def h5():
     problems += same(o("drv_u.bin"), o("drv_L.bin"), "-l from /usrlib")
     for entry, want in (([], False), (["-Wl,--entry=_extra_unused"], True)):
         problems += expect_ok(agonc("-save-temps", *entry, "-o", o("entry.bin"), "-lextra", *common), "-Wl,--entry")
-        asm = (read(os.path.join(ROOT, "tmp", "entry.asm")) or b"").decode()
+        asm = (read(os.path.join(ROOT, "tmp", "agonc", "entry.asm")) or b"").decode()
         if ("_extra_unused:" in asm) != want:
             problems.append(f"with options {entry}: _extra_unused {'not ' if want else ''}linked")
     for f in tmp_files():
-        os.remove(os.path.join(REPO, ROOT, "tmp", f))
+        os.remove(os.path.join(REPO, ROOT, "tmp", "agonc", f))
     return problems
 
 
@@ -458,9 +467,9 @@ def s1():
     card = os.path.join("emulator_sdcard", "drvs1")
     problems += same(os.path.join(card, "usrlib", "libextra.s"), o("s1/libextra.s"), "device libextra.s")
     problems += same(os.path.join(card, "bin", "dprog.bin"), o("s1/dprog.bin"), "device dprog.bin")
-    left = os.listdir(os.path.join(REPO, card, "tmp")) if exists(os.path.join(card, "tmp")) else []
+    left = os.listdir(os.path.join(REPO, card, "tmp", "agonc")) if exists(os.path.join(card, "tmp", "agonc")) else []
     if left:
-        problems.append(f"the device builds left {left} in /tmp")
+        problems.append(f"the device builds left {left} in /tmp/agonc")
     return problems
 
 
@@ -471,16 +480,16 @@ def fail_stops():
     problems = [] if rc == 124 else [f"got {rc}, expected 124 (0: the script went on after the failure)"]
     if exists(os.path.join(card, "bin", "x.bin")):
         problems.append("the failed build left /bin/x.bin")
-    left = os.listdir(os.path.join(REPO, card, "tmp")) if exists(os.path.join(card, "tmp")) else []
+    left = os.listdir(os.path.join(REPO, card, "tmp", "agonc")) if exists(os.path.join(card, "tmp", "agonc")) else []
     if left:
-        problems.append(f"the failed build left {left} in /tmp")
+        problems.append(f"the failed build left {left} in /tmp/agonc")
     return problems
 
 
 def interrupted(card, passes, press=True):
-    """Ctrl-C while cc1 writes /tmp/many.ir must stop the script too; the
+    """Ctrl-C while cc1 writes /tmp/agonc/many.ir must stop the script too; the
     guard (press False) is the same build left alone, which finishes."""
-    extra = ["--ctrl-c-when", "/tmp/many.ir"] if press else []
+    extra = ["--ctrl-c-when", "/tmp/agonc/many.ir"] if press else []
     rc = emulate([o("t_drv.bin")], ["agonc -o /bin/many.bin many.c", "t_drv"], card, 60, card_files(passes) + extra)
     if not press:
         return [] if rc == 0 else [f"guard: without Ctrl-C the build and t_drv gave {rc}, expected 0"]
@@ -488,9 +497,9 @@ def interrupted(card, passes, press=True):
     problems = [] if rc == 124 else [f"got {rc}, expected 124 (0: the build went on after Ctrl-C)"]
     if exists(os.path.join(card_dir, "bin", "many.bin")):
         problems.append("the interrupted build left /bin/many.bin")
-    left = os.listdir(os.path.join(REPO, card_dir, "tmp")) if exists(os.path.join(card_dir, "tmp")) else []
+    left = os.listdir(os.path.join(REPO, card_dir, "tmp", "agonc")) if exists(os.path.join(card_dir, "tmp", "agonc")) else []
     if left:
-        problems.append(f"the interrupted build left {left} in /tmp")
+        problems.append(f"the interrupted build left {left} in /tmp/agonc")
     return problems
 
 

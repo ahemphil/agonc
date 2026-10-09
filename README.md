@@ -53,10 +53,11 @@ release it. Claude will take it from here.
 
 agonc is a C compiler that runs on the Agon Light and Agon Console8, the
 eZ80 computers, and compiles C programs into MOS programs on the Agon
-itself. No PC is needed to use it. It compiles ANSI C89, with its whole
-standard library, plus some of C99, and it compiles itself.
+itself. No PC is needed to use it. It compiles C99, all but variable-length
+arrays and complex numbers, with its standard library, and strict ANSI C89
+with `-ansi`; and it compiles itself.
 
-**This is a beta: version 1.1.0-beta.1, the first public release.** It
+**This is a beta: version 1.1.0-beta.2.** It
 passes its own tests and three free C test suites, and it has run on real
 hardware, but few people have used it yet. Reports of anything that goes
 wrong are very welcome ([Contributing](#contributing)).
@@ -69,12 +70,16 @@ agonc -o game.bin main.c gfx.c   several files
 
 ## What it has
 
-- **C89, all of it**, with a strict mode (`-ansi`) that conforms, and a
-  default mode that adds C99's `long long`, `//` comments and a few other
-  things existing programs use.
-- **The whole C89 library**: files on the SD card, `printf` and `scanf` with
-  floating point, `<math.h>`, `<time.h>` on the Agon's clock, `<signal.h>`
-  with Ctrl-C, and the rest.
+- **C99** but for variable-length arrays and complex numbers, as C11 left
+  it mandatory: `long long`, `_Bool`, `inline`, `//` comments,
+  declarations anywhere, designated initialisers, compound literals,
+  variadic macros and the rest. **C89, all of it**, in a strict mode
+  (`-ansi`) that conforms.
+- **The standard library**, C99's included but for `<complex.h>`,
+  `<fenv.h>`, `<tgmath.h>` and the wide characters: files on the SD card,
+  `printf`, `snprintf` and `scanf` with floating point, `<math.h>` with
+  C99's functions and their `float` forms, `<stdint.h>` and `<inttypes.h>`,
+  `<time.h>` on the Agon's clock, `<signal.h>` with Ctrl-C, and the rest.
 - **IEEE 754 `float` and `double`**, correctly rounded, done in software
   (the eZ80 has no floating-point hardware), and 64-bit `long long`.
 - **The Agon's own interface**: every MOS 2.3.3 call, the serial port, and
@@ -90,10 +95,10 @@ emulator.
 
 ## Install
 
-Download `agonc-1.1.0-beta.1.zip` from the
+Download `agonc-1.1.0-beta.2.zip` from the
 [Releases page](https://github.com/ahemphil/agonc/releases) and unzip it
 onto the root of the Agon's SD card, merging its folders with the
-ones already there. It adds `/mos/agonc.bin`, `/bin/agonc/`, `/lib/`,
+ones already there. It adds `/mos/agonc.bin`, `/bin/agonc/`, `/lib/agonc/`,
 `/usrlib/`, `/tmp/` and the ez80asm assembler it was tested with. Then, at
 the MOS prompt, `agonc --version`.
 
@@ -148,8 +153,8 @@ is decided case by case.
 
 MIT: see [LICENSE](LICENSE). Copyright (c) 2026 Adam Hemphill. The ez80asm
 assembler in `third_party/ez80asm/` and in the release is Jeroen Venema's,
-under its own MIT licence; `lib/libc/math.c` keeps the notice of fdlibm,
-from which its algorithms come.
+under its own MIT licence; `lib/libc/math.c` and `lib/libc/math99.c` keep
+the notice of fdlibm, from which their algorithms come.
 
 ## Layout
 

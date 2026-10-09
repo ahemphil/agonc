@@ -15,7 +15,7 @@ and nothing else:
 
 ```text
 Setting minimum memory configuration
-Assembling /tmp/hello.asm
+Assembling /tmp/agonc/hello.asm
 Wrote hello.bin, 2875 bytes
 Done in 1.20 seconds
 ```
@@ -43,7 +43,7 @@ game.c:41: error: call to undeclared function draw_ship
 game.c:58: warning: control reaches the end of a function that returns a value
 agonc: error: cannot find -lsprite
 ld: error: undefined symbol _score (referenced from unit hud.c, section _show_hud)
-File "/tmp/game.asm" line 2210 - Unknown identifier 'loop1'
+File "/tmp/agonc/game.asm" line 2210 - Unknown identifier 'loop1'
 ```
 
 The file and line in a preprocessor or compiler message are those of your
@@ -52,7 +52,7 @@ for a missing token, the line of the token before it. The linker names
 symbols as the assembler sees them: a C name with `_` in front (`_main`),
 and a `static` function or object as `__s`, its file's unit id (four
 hexadecimal digits) and its name (`__s3f2a_helper`). A message that names a file in
-`/tmp` is about an intermediate file; `-save-temps` keeps those files so
+`/tmp/agonc` is about an intermediate file; `-save-temps` keeps those files so
 that you can look at the line it gives.
 
 ez80asm reports only its first error, with a line number in the linked
@@ -141,11 +141,11 @@ libraries, passes, the assembler and the image come later, at the link.
 | `no input files (agonc -h lists the options)` | nothing to compile |
 | `prog.c: no such file` | check the name and the current folder |
 | `prog.cpp: unknown file type (use .c, .i, .s or .asm)` | agonc goes by the extension |
-| `b/util.c: another input has the same name` | two inputs called `util.c` would share `/tmp` files; rename one |
+| `b/util.c: another input has the same name` | two inputs called `util.c` would share `/tmp/agonc` files; rename one |
 | `prog.c: the output would overwrite an input` | `-o` names an input |
 | `prog.c: the program would overwrite a source file ...` | `-o` names a source file; a program's name ends in `.bin` |
 | `-o with -E, -c or -S needs a single input` | name one input, or leave out `-o` |
-| `cannot find -lutil` | no `libutil.s` in the `-L` folders, `/usrlib`, `/lib/agon` or `/lib` |
+| `cannot find -lutil` | no `libutil.s` in the `-L` folders, `/usrlib`, `/lib/agonc/agon` or `/lib/agonc` |
 | `cannot run /bin/agonc/cc1.bin` | a pass or `/bin/ez80asm.bin` is missing, or would not load |
 | `the assembler did not produce prog.bin` | ez80asm failed; its message is just above |
 | `prog.bin: image too large: ...` | the program does not fit in memory (below) |
@@ -181,8 +181,8 @@ of files or options, put them in a file and give `@file`: the file's words
 are separated by spaces, tabs or line ends, with no quoting and no nested
 `@`, and the file must be under 1,200 bytes (`response file too long`
 otherwise). agonc passes long command lines to its passes the same way, as
-`/tmp/cpp.rsp` and the like, so a message such as `cc1: cannot open
-response file /tmp/cc1.rsp` means `/tmp` could not be written.
+`/tmp/agonc/cpp.rsp` and the like, so a message such as `cc1: cannot open
+response file /tmp/agonc/cc1.rsp` means `/tmp/agonc` could not be written.
 
 **Files that will not open.** MOS has eight file handles and does not close
 a program's files when it ends. agonc closes them after every pass, but a
@@ -193,20 +193,23 @@ program that crashed can leave handles open, and then a pass reports
 
 | Message | Meaning and remedy |
 |---|---|
-| `cannot find include file mos_api.h` | not in the including file's folder, the `-I` folders, `/usrlib` or `/lib`; for a program from AgDev see [Porting from AgDev](07-porting-from-agdev.md) |
+| `cannot find include file mos_api.h` | not in the including file's folder, the `-I` folders, `/usrlib` or `/lib/agonc`; for a program from AgDev see [Porting from AgDev](07-porting-from-agdev.md) |
 | `#error text` | the source asked for this error |
 | `#warning text` | a warning the source asked for (default mode) |
 | `unknown directive #warning` | `#warning` in strict mode, or a misspelt directive |
 | `macro redefined differently: NAME` | two `#define`s of one name disagree; `#undef` it first |
 | `MAX takes 2 arguments, not 3` | a function-like macro called with the wrong count |
 | `unterminated call of macro MAX` | the closing `)` never came |
-| `'...' in a macro's parameters (a C99 feature)` | variadic macros are not provided |
+| `'...' in a macro's parameters (a C99 feature)` | strict mode: variadic macros are C99's, which the default mode has |
+| `'...' must be a macro's last parameter` | `#define F(..., a)`: the `...` goes last |
+| `_Pragma needs a string in parentheses` | also `_Pragma needs a string literal` and `missing ')' after _Pragma's string`: write `_Pragma("text")` |
 | `unterminated #if` | an `#if` without `#endif` in the same file; the line is the `#if`'s |
 | `#endif without #if` | also `#else` and `#elif`; or `#else after #else` |
 | `unterminated comment` | a `/*` never closed; the line is where it starts |
 | `invalid #if expression` | often an undefined function-like macro used in `#if` |
 | `#asm without #endasm` | the block runs to the end of the file |
 | warning: `#pragma is ignored` | every `#pragma` except `#pragma weak` |
+| warning: `_Pragma is ignored` | as for `#pragma`; `_Pragma("weak name")` says to use the `#pragma weak` directive instead |
 | warning: `a trigraph, which only strict mode (-ansi) replaces` | `??=` and the like stay as written in the default mode |
 
 Table limits in the preprocessor are under [When a table is
@@ -250,30 +253,50 @@ normally by including the right header.
 
 ### Code written for C99 or GCC
 
-The default mode takes a few C99 features (`//` comments, `long long`,
-declarations after statements, a comma after the last enumerator,
-non-constant initialisers for local arrays and structures) but not the
-rest. Code that uses the rest fails with a syntax error that does not name
-the feature:
+The default mode takes C99's language but for variable-length arrays and
+complex numbers ([The
+language](03-the-language.md#the-two-modes) lists it). What it lacks fails
+with a syntax error that does not name the feature:
 
 | In the source | Message | Rewrite as |
 |---|---|---|
-| `for (int i = 0; ...)` | `expected an expression` | declare `i` before the loop |
-| `{ .x = 1 }`, `[3] = 1` | `expected an expression` | positional initialisers |
-| `(int[]){ 1, 2 }` | `expected an expression` | a named object |
-| `inline int f(void)` | `type defaults to int` and `expected ';' after a declaration` | drop `inline`, or `#define inline` |
-| `bool`, `_Bool` | as for `inline` | `int`, or your own `typedef` |
-| `uint8_t` without `<stdint.h>` | as for `inline` | include `<stdint.h>` |
 | `int a[n];` | `not an integer constant expression` | `malloc`, or a fixed size |
-| `#define F(a, ...)` | `'...' in a macro's parameters (a C99 feature)` | a fixed parameter list |
+| `bool` without `<stdbool.h>` | `type defaults to int` and `expected ';' after a declaration` | include `<stdbool.h>` |
+| `uint8_t` without `<stdint.h>` | as for `bool` | include `<stdint.h>` |
 | `asm("..." : "=r"(x))` | `expected ')'` | basic `asm("...")` reading the frame ([inline assembly](#inline-assembly)) |
 | `asm volatile ("...")` | `expected '(' after asm` | `asm("...")`, which agonc copies as written, where it stands |
+
+The C99 features it has bring errors of their own:
+
+| Message | Meaning |
+|---|---|
+| `'_Bool' with 'short', 'long', 'signed' or 'unsigned'` | `_Bool` takes none of them |
+| `a flexible array member must be the last member` | `int d[];` ends the structure |
+| `a flexible array member needs a member before it` | a structure of a flexible array member alone |
+| `a flexible array member in a union` | only a structure may have one |
+| `a flexible array member cannot be initialised` | give it its elements at run time, in memory from `malloc` |
+| `a struct with a flexible array member cannot be a member` | also `array of a struct with a flexible array member`: use a pointer to one |
+| `a hexadecimal floating constant needs an exponent (p)` | `0x1.8p0`, not `0x1.8` |
+| `a hexadecimal floating constant with no digits` | `0x.p1` |
+| `an array designator beyond the array's bounds` | `[n] =` with `n` negative, or past a known size |
+| `no member named y` | `.y =` names no member of that structure |
+| `a member designator for an array` | also `an array designator for a struct`: `.x` and `[n]` the wrong way round |
+| `a designator for a part of something that is not an array or a struct` | `.x.y` where `x` is a scalar or a bit-field |
+| `expected '=' after a designator` | `{ [1] 2 }`: C99 needs the `=` |
+| `a designator goes back before what agonc has already written of this initialiser (it holds 512 items)` | a long initialiser, then a designator for something early in it: put the designators first, or split the object |
+| `a compound literal of a function, void or an incomplete type` | `(void){ 0 }`, or a structure not yet defined |
 
 In strict mode `long long` gives `'long long' is not C89`, a trailing comma
 in an `enum` gives `a comma after the last enumerator (a C99 feature)`, and
 `//` is not a comment, which usually shows as `declaration without a name`
-or `expected an expression`. [The language](03-the-language.md) lists what
-each mode accepts.
+or `expected an expression`. C99's other features fail as they would in a
+C89 compiler: a declaration in a `for`, a designator and a compound
+literal give `expected an expression`; `inline`, `restrict` and `_Bool` are
+ordinary names, so `inline int f(void)` gives `type defaults to int` and
+`expected ';' after a declaration`; a hexadecimal floating constant gives
+`invalid suffix on integer constant`; a flexible array member gives `member
+of void or incomplete type: d`; and `...` in a macro's parameters gives
+`'...' in a macro's parameters (a C99 feature)`.
 
 ### Inline assembly
 
@@ -295,7 +318,7 @@ defines, by ez80asm.
 | `type defaults to int (implicit int)` | `static x;` or `f() { ... }`: add `int` |
 | `parameter defaults to int (implicit int): b` | a K&R parameter with no declaration |
 | `an old-style (K&R) function definition; ...` | default mode only; a prototype-style definition has its calls checked |
-| `declaration after a statement (a C99 feature)` | accepted in both modes |
+| `declaration after a statement (a C99 feature)` | strict mode only; C99 allows it, and so does the default mode |
 | `control reaches the end of a function that returns a value` | a path ends without `return` |
 | `'return;' in a function that returns a value` | the caller gets an undefined value |
 | `incompatible pointer types (assignment)` | also `argument`, `initialiser`, `return`: a cast says you mean it |
@@ -324,7 +347,7 @@ stops it with a message naming the table, such as
 ```text
 game.c:812: error: too many locals in one function (a cc1 table limit; raise it in cc1.h)
 game.c:900: error: expression too complex (a cc1 table limit; raise MAX_NODES)
-/tmp/game.ir:20711: cc2: too many instructions in one function (raise the limit in cc2.c)
+/tmp/agonc/game.ir:20711: cc2: too many instructions in one function (raise the limit in cc2.c)
 ld: too many sections (limit reached; raise it in ld.c)
 ```
 
@@ -375,7 +398,7 @@ theirs (`cc1: peaks: ...`) only when run on their own with `-v`.
 | `undefined symbol _f (referenced from unit main.c, section _main)` | `_main` in `main.c` uses `f`, which no input defines |
 | `undefined symbol _f (a root)` | `-Wl,--entry=_f` names something that does not exist |
 | `implicit call to _f, which returns long (or float) (...)` | strict mode: see [implicit declarations](#declarations-calls-and-types) |
-| `/tmp/b.s:13: error: duplicate definition of _count (unit a.c section _count, and unit b.c section _count)` | two files define the same global name |
+| `/tmp/agonc/b.s:13: error: duplicate definition of _count (unit a.c section _count, and unit b.c section _count)` | two files define the same global name |
 | `lib.idx does not match lib.s (section _f); make it again with agonc --index` | the library changed since it was indexed |
 | `no __start code section (is crt0.s missing?)` | `-nostdlib` without start-up code of your own |
 | `unit x.s has id 1a2b, but its name hashes to 3c4d` | a hand-written `.s` file's `;;unit` line; leave the id out and the linker works it out |
@@ -386,7 +409,8 @@ theirs (`cc1: peaks: ...`) only when run on their own with `-v`.
 uses: a function nothing calls may refer to anything. An undefined symbol
 usually means a source file or a `-l` library left off the command line, a
 name misspelt in a declaration, or a library function that agonc does not
-have (`snprintf` and `strdup`, for example, are not in its C89 library).
+have (`strdup`, for example). With `-ansi`, C99's functions, such as
+`snprintf` and `roundf`, are not declared, and a call to one is an error.
 
 **Duplicate definitions.** In agonc an external object has exactly one
 definition in the program. `int count;` at file scope in two files, which
@@ -400,7 +424,7 @@ file.
 
 ez80asm assembles the linked program, so its messages are almost always
 about assembly you wrote: `asm` statements, `#asm` blocks or `.s` files.
-The line number is in `/tmp/prog.asm` (named after the output); build again
+The line number is in `/tmp/agonc/prog.asm` (named after the output); build again
 with `-save-temps` to look at it. When the message comes from ez80asm the
 line itself is often printed under it.
 

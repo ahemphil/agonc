@@ -45,7 +45,7 @@
  *
  * Map: helpers; the exact operations (fabs, floor, ceil, modf, frexp,
  * ldexp, fmod, sqrt); exponentials and logarithms (exp, log, log10, and
- * expm1_ for sinh, cosh, tanh); pow; the trigonometric kernels k_sin,
+ * __expm1 for sinh, cosh, tanh, and math99.c's expm1); pow; the trigonometric kernels k_sin,
  * k_cos, k_tan and the reductions rem_pio2 and rem_pio2_big, then sin,
  * cos, tan; atan, atan2, asin, acos.
  */
@@ -147,7 +147,7 @@ double fabs(double x)
  * fraction bits worth less than 1 are the 52 - e lowest: the mask m
  * clears them, in the high word alone when e < 20 (and the low word
  * whole), otherwise in the low word. No arithmetic, so it is exact. */
-static double trunc_(double x)
+double __trunc(double x)
 {
     u32 h;
     u32 m;
@@ -168,7 +168,7 @@ static double trunc_(double x)
     return x;                                           /* integral already, or not finite */
 }
 
-/* floor and ceil: trunc_, then one step down (or up) when it moved a
+/* floor and ceil: __trunc, then one step down (or up) when it moved a
  * non-integer the wrong way. x + x returns a NaN quiet and an infinity
  * unchanged. */
 double floor(double x)
@@ -177,7 +177,7 @@ double floor(double x)
 
     if ((hiw(x) & 0x7FF00000UL) == 0x7FF00000UL)
         return x + x;
-    t = trunc_(x);
+    t = __trunc(x);
     if (t != x && x < 0)
         t = t - 1.0;
     return t;
@@ -189,7 +189,7 @@ double ceil(double x)
 
     if ((hiw(x) & 0x7FF00000UL) == 0x7FF00000UL)
         return x + x;
-    t = trunc_(x);
+    t = __trunc(x);
     if (t != x && x > 0)
         t = t + 1.0;
     return t;
@@ -208,7 +208,7 @@ double modf(double x, double *ip)
             return x + x;                               /* NaN */
         return mk(h & 0x80000000UL, 0);                 /* an infinity: a signed zero */
     }
-    *ip = trunc_(x);
+    *ip = __trunc(x);
     return mk((hiw(x - *ip) & 0x7FFFFFFFUL) | (h & 0x80000000UL), low(x - *ip));
 }
 
@@ -553,14 +553,14 @@ double log10(double x)
  * built on r^2/2 (hxs; r1 the polynomial, Q1 to Q5); then
  * e^x - 1 = 2^k (e^r - 1) + 2^k - 1,
  * arranged for each range of k so that nothing large cancels. C89 has
- * no expm1, so it is static here. */
+ * no expm1, so it has a reserved name here: math99.c's expm1 is C99's. */
 static double Q1 = -3.33333333333331316428e-02;        /* 0xBFA11111, 0x111110F4 */
 static double Q2 = 1.58730158725481460165e-03;         /* 0x3F5A01A0, 0x19FE5585 */
 static double Q3 = -7.93650757867487942473e-05;        /* 0xBF14CE19, 0x9EAADBB7 */
 static double Q4 = 4.00821782732936239552e-06;         /* 0x3ED0CFCA, 0x86E65239 */
 static double Q5 = -2.01099218183624371326e-07;        /* 0xBE8AFDB7, 0x6E09C32D */
 
-static double expm1_(double x)
+double __expm1(double x)
 {
     double y;
     double hi;
@@ -668,7 +668,7 @@ double sinh(double x)
     if (ix < 0x40360000UL) {                            /* |x| < 22 */
         if (ix < 0x3E300000UL)                          /* |x| < 2^-28 */
             return x;
-        t = expm1_(fabs(x));
+        t = __expm1(fabs(x));
         if (ix < 0x3FF00000UL)
             return h * (2.0 * t - t * t / (t + one));
         return h * (t + t / (t + one));
@@ -697,7 +697,7 @@ double cosh(double x)
     if (ix >= 0x7FF00000UL)
         return x * x;
     if (ix < 0x3FD62E43UL) {                            /* |x| < 0.5 ln2 */
-        t = expm1_(fabs(x));
+        t = __expm1(fabs(x));
         w = one + t;
         if (ix < 0x3C800000UL)
             return w;                                   /* cosh(tiny) = 1 */
@@ -737,10 +737,10 @@ double tanh(double x)
         if (ix < 0x3C800000UL)                          /* |x| < 2^-55 */
             return x * (one + x);
         if (ix >= 0x3FF00000UL) {                       /* |x| >= 1 */
-            t = expm1_(2.0 * fabs(x));
+            t = __expm1(2.0 * fabs(x));
             z = one - 2.0 / (t + 2.0);
         } else {
-            t = expm1_(-2.0 * fabs(x));
+            t = __expm1(-2.0 * fabs(x));
             z = -t / (t + 2.0);
         }
     } else {

@@ -97,6 +97,15 @@ void sf32_to_long64(unsigned long a, int is_signed, unsigned long *hi, unsigned 
 void sf64_from_decimal(struct sf64 *r, int sign, const char *digits, int n, long exp10);
 unsigned long sf32_from_decimal(int sign, const char *digits, int n, long exp10);
 
+/* A hexadecimal floating constant (C99), correctly rounded: the 64-bit
+ * integer hi:lo of its leading digits times 2^exp2, sticky nonzero if
+ * digits beyond them that were not 0 were dropped. */
+void sf64_from_hex(struct sf64 *r, unsigned long hi, unsigned long lo, int sticky, long exp2);
+unsigned long sf32_from_hex(unsigned long hi, unsigned long lo, int sticky, long exp2);
+
+/* x y + z rounded once (C99's fma), built with SOFTFP_FMA (fp.c). */
+void sf64_fma(struct sf64 *r, const struct sf64 *x, const struct sf64 *y, const struct sf64 *z);
+
 /* A finite |a| as decimal digits for printf, correctly rounded (to
  * nearest, ties to even): mode 'e', prec + 1 significant digits; mode 'f',
  * down to 10^-prec. Writes the digits d1 d2 ... to buf (which needs 800

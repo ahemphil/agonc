@@ -15,6 +15,8 @@ agonc -O -Werror -c -o s3/exit.s lib/libc/exit.c
 agonc -O -Werror -c -o s3/time.s lib/libc/time.c
 agonc -O -Werror -c -o s3/fp.s lib/libc/fp.c
 agonc -O -Werror -c -o s3/math.s lib/libc/math.c
+agonc -O -Werror -c -o s3/math99.s lib/libc/math99.c
+agonc -O -Werror -c -o s3/mathf.s lib/libc/mathf.c
 agonc -O -Werror -c -o s3/ll.s lib/libc/ll.c
 agonc -O -Werror -c -o s3/mos.s lib/agon/mos.c
 agonc -O -Werror -c -o s3/uart.s lib/agon/uart.c
@@ -42,6 +44,8 @@ compare out/exit.s s3/exit.s
 compare out/time.s s3/time.s
 compare out/fp.s s3/fp.s
 compare out/math.s s3/math.s
+compare out/math99.s s3/math99.s
+compare out/mathf.s s3/mathf.s
 compare out/ll.s s3/ll.s
 compare out/mos.s s3/mos.s
 compare out/uart.s s3/uart.s

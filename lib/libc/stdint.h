@@ -1,6 +1,6 @@
 /* stdint.h - C99's integer types for the widths this target has (8, 16,
  * 24, 32 and, but in strict mode, which has no long long, 64 bits), with
- * their limits. An extension to C89: agonc ships it in /lib. The
+ * their limits. An extension to C89: agonc ships it in /lib/agonc. The
  * greatest-width types are long long's, or strict mode's long. The fast
  * types of 8 to 24 bits are int, the eZ80's natural width. */
 

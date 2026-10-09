@@ -44,7 +44,7 @@ OUT = os.path.join("build", "test", "cc1")
 PY = sys.executable
 HOST = os.path.join("build", "host")
 RUNTIME = [os.path.join("lib", "rt", "crt0.s"), os.path.join("lib", "rt", "rt.s"),
-           os.path.join("build", "agon", "lib", "libc.s"), os.path.join("build", "agon", "lib", "libm.s")]
+           os.path.join("build", "agon", "lib", "agonc", "libc.s"), os.path.join("build", "agon", "lib", "agonc", "libm.s")]
 
 
 def sh(cmd, **kw):
@@ -97,6 +97,11 @@ DIAG = [
      ["d.c:1: error: call to undeclared function foo"]),
     ("arg count", "int f(int a);\nint main(void) { return f(1, 2); }", [], 200,
      ["d.c:2: error: wrong number of arguments to f (2 given, 1 expected)"]),
+    ("31 arguments in a call", "int f();\nint g(void) { return f(" + ", ".join(["1"] * 31) + "); }", [], 0, []),
+    ("32 arguments in a call", "int f();\nint g(void) { return f(" + ", ".join(["1"] * 32) + "); }", [], 200,
+     ["d.c:2: error: more than 31 arguments in a call"]),
+    ("32 K&R parameter names", "int f(" + ", ".join("p%d" % i for i in range(32)) + ") { return 0; }", [], 200,
+     ["d.c:1: error: more than 31 parameters"]),
     ("local redeclaration", "int main(void) { int a; int a; return 0; }", [], 200,
      ["d.c:1: error: redeclaration in the same scope: a"]),
     ("a nested block may shadow", "int main(void) {\n int a;\n {\n  int a;\n }\n return 0;\n}", [], 0, []),
@@ -308,8 +313,9 @@ DIAG = [
      ["orig.c:40: error: undeclared identifier y"]),
     # warnings: status 0
     ("// comment", "int x; // hi", [], 0, []),
-    ("late declaration", "int main(void) {\n int a;\n a = 1;\n int b;\n return a;\n}", [], 0,
+    ("late declaration, strict", "int main(void) {\n int a;\n a = 1;\n int b;\n return a;\n}", ["-ansi"], 0,
      ["d.c:4: warning: declaration after a statement (a C99 feature)"]),
+    ("late declaration", "int main(void) {\n int a;\n a = 1;\n int b;\n return a;\n}", [], 0, []),
     ("falls off", "int f(int x) {\n if (x)\n  return 1;\n}", [], 0,
      ["d.c:4: warning: control reaches the end of a function that returns a value"]),
     ("no fall-off after if/else returns", "int f(int x) { if (x) return 1; else return 2; }", [], 0, []),
@@ -446,6 +452,86 @@ DIAG = [
      "__builtin_expect(1, 1) + __builtin_constant_p(3) + (int)__builtin_offsetof(struct { int a; int b; }, b); }",
      ["-ansi"], 0, []),
     ("-Werror", "int x = 'ab';", ["-Werror"], 200, ["d.c:1: error: a multi-character character constant"]),
+    # the default mode's C99 (t_c99.c runs them)
+    ("a declaration in for, strict", "int f(void) {\n int t = 0;\n for (int i = 0; i < 3; i++)\n  t += i;\n"
+     " return t;\n}", ["-ansi"], 200, ["d.c:3: error: expected an expression"]),
+    ("a for's declaration ends with the loop", "int f(void) {\n for (int i = 0; i < 3; i++)\n  ;\n return i;\n}",
+     [], 200, ["d.c:4: error: undeclared identifier i"]),
+    ("inline, strict", "inline int f(void) { return 1; }", ["-ansi"], 200,
+     ["d.c:1: error: expected ';' after a declaration"]),
+    ("restrict, strict", "void f(int *restrict p);", ["-ansi"], 200, ["d.c:1: error: expected ')' after parameters"]),
+    ("__func__ outside a function", "char *p = __func__;", [], 200, ["d.c:1: error: undeclared identifier __func__"]),
+    ("_Bool, strict", "_Bool b;", ["-ansi"], 200, ["d.c:1: error: expected ';' after a declaration"]),
+    ("unsigned _Bool", "unsigned _Bool b;", [], 200,
+     ["d.c:1: error: '_Bool' with 'short', 'long', 'signed' or 'unsigned'"]),
+    ("a _Bool bit-field of 2 bits", "struct s { int n; _Bool f : 2; };", [], 200,
+     ["d.c:1: error: a bit-field wider than its type (or than 24 bits) or of negative width"]),
+    ("a pointer to _Bool needs no cast", "int f(void) { int x; _Bool b = &x; return b; }", [], 0, []),
+    ("a struct to _Bool", "struct s { int a; } v;\n_Bool f(void) { return v; }", [], 200,
+     ["d.c:2: error: incompatible struct value in return"]),
+    ("a flexible array member", "struct s { int n; int d[]; };\nstruct s a = { 1 };", [], 0, []),
+    ("a flexible array member, strict", "struct s { int n; int d[]; };", ["-ansi"], 200,
+     ["d.c:1: error: member of void or incomplete type: d"]),
+    ("a flexible array member not last", "struct s { int n; int d[]; int m; };", [], 200,
+     ["d.c:1: error: a flexible array member must be the last member"]),
+    ("a flexible array member in a union", "union u { int n; int d[]; };", [], 200,
+     ["d.c:1: error: a flexible array member in a union"]),
+    ("a flexible array member alone", "struct s { int d[]; };", [], 200,
+     ["d.c:1: error: a flexible array member needs a member before it"]),
+    ("a struct with a flexible array member as a member", "struct s { int n; int d[]; };\n"
+     "struct t { struct s a; int k; };", [], 200,
+     ["d.c:2: error: a struct with a flexible array member cannot be a member"]),
+    ("an array of a struct with a flexible array member", "struct s { int n; int d[]; };\nstruct s a[2];", [], 200,
+     ["d.c:2: error: array of a struct with a flexible array member"]),
+    ("a flexible array member initialised", "struct s { int n; int d[]; };\nstruct s a = { 1, { 2, 3 } };", [], 200,
+     ["d.c:2: error: a flexible array member cannot be initialised"]),
+    ("a hexadecimal floating constant without p", "double d = 0x1.8;", [], 200,
+     ["d.c:1: error: a hexadecimal floating constant needs an exponent (p)"]),
+    ("a hexadecimal floating constant without digits", "double d = 0x.p1;", [], 200,
+     ["d.c:1: error: a hexadecimal floating constant with no digits"]),
+    ("a hexadecimal floating constant, strict", "double d = 0x1p3;", ["-ansi"], 200,
+     ["d.c:1: error: invalid suffix on integer constant"]),
+    ("a hexadecimal floating constant beyond double", "double d = 0x1p1024;", [], 0,
+     ["d.c:1: warning: floating constant out of range for double (it is infinity)"]),
+    ("a hexadecimal floating constant beyond float", "float d = 0x1p128f;", [], 0,
+     ["d.c:1: warning: floating constant out of range for float (it is infinity)"]),
+    # N5: designated initialisers and compound literals (t_c99.c runs them)
+    ("a designator, strict", "int a[3] = { [1] = 2 };", ["-ansi"], 200, ["d.c:1: error: expected an expression"]),
+    ("a member designator, strict", "struct s { int x; } v = { .x = 1 };", ["-ansi"], 200,
+     ["d.c:1: error: expected an expression"]),
+    ("an array designator beyond the bounds", "int a[3] = { [3] = 2 };", [], 200,
+     ["d.c:1: error: an array designator beyond the array's bounds"]),
+    ("a negative array designator", "int a[3] = { [-1] = 2 };", [], 200,
+     ["d.c:1: error: an array designator beyond the array's bounds"]),
+    ("a designator naming no member", "struct s { int x; } v = { .y = 1 };", [], 200,
+     ["d.c:1: error: no member named y"]),
+    ("a member designator for an array", "int a[3] = { .x = 1 };", [], 200,
+     ["d.c:1: error: a member designator for an array"]),
+    ("an array designator for a struct", "struct s { int x; } v = { [0] = 1 };", [], 200,
+     ["d.c:1: error: an array designator for a struct"]),
+    ("a designator into a scalar", "struct s { int x; } v = { .x.y = 1 };", [], 200,
+     ["d.c:1: error: a designator for a part of something that is not an array or a struct"]),
+    ("a designator without =", "int a[3] = { [1] 2 };", [], 200, ["d.c:1: error: expected '=' after a designator"]),
+    ("an array designator that is not a constant", "int n; int a[3] = { [n] = 2 };", [], 200,
+     ["d.c:1: error: not an integer constant expression"]),
+    ("too many after a designator", "int a[3] = { [2] = 1, 2 };", [], 200, ["d.c:1: error: too many initialisers"]),
+    ("a union's members by designators", "union u { int i; char c; } v = { .c = 1, .i = 2 };", [], 0, []),
+    ("a designator going back too far", "int big[1000] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, [3] = 9 };", [], 200,
+     ["d.c:1: error: a designator goes back before what agonc has already written of this initialiser "
+      "(it holds 512 items)"]),
+    ("a long initialiser in order", "int big[1000] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899 };", [], 0, []),
+    ("a compound literal, strict", "int f(void) { return (int){ 1 }; }", ["-ansi"], 200,
+     ["d.c:1: error: expected an expression"]),
+    ("a compound literal of void", "int f(void) { (void){ 0 }; return 0; }", [], 200,
+     ["d.c:1: error: a compound literal of a function, void or an incomplete type"]),
+    ("a compound literal of an incomplete struct", "struct t; int f(void) { (struct t){ 0 }; return 0; }", [], 200,
+     ["d.c:1: error: a compound literal of a function, void or an incomplete type"]),
+    ("a file-scope compound literal is constant", "int g; int *p = (int[]){ g };", [], 200,
+     ["d.c:1: error: initialiser is not a constant"]),
+    ("a compound literal in a function is not a static's constant",
+     "int f(void) { static int *p = (int[]){ 1 }; return *p; }", [], 200,
+     ["d.c:1: error: initialiser is not a constant"]),
+    ("sizeof a compound literal", "int n = sizeof (char[]){ 1, 2, 3 };", [], 0, []),
     ("-w", "int x = 'ab';", ["-w"], 0, []),
 ]
 
@@ -482,6 +568,11 @@ IR_CASES = [
      "int g(void) { return sizeof(1.0) + sizeof(2LL); }", [], ["R __fp_print", "R __ll_print"]),
     ("a double value does bring in printf's conversions",
      "double d;\nint g(void) { return d > 0; }", ["R __fp_print"], []),
+    ("inline's linkage: static unless declared, or defined, extern",
+     "inline int sq(int x) { return x * x; }\nint ext(int x);\ninline int ext(int x) { return x; }\n"
+     "static inline int s2(int x) { return x; }\nextern inline int e2(int x) { return x; }\n"
+     "int use(void) { return sq(2) + ext(1) + s2(3) + e2(4); }",
+     ["F .sq s 1 @ -", "F ext g 1 @ -", "F .s2 s 1 @ -", "F e2 g 1 @ -"], []),
 ]
 
 
@@ -591,6 +682,19 @@ def t4_ll():
     return t4_file("t_ll", "checkq(u % 10, 0, 5);", "checkq(u % 10, 0, 6);", 15, 165)
 
 
+def t4_c99():
+    stub = os.path.join(REPO, o("hostexit.c"))
+    open(stub, "w", newline="\n").write("#include <stdlib.h>\nvoid agon_emu_exit(int s) { exit(s); }\n")
+    exe = os.path.join(REPO, o("t_c99_host.exe"))
+    r = sh([HOSTCC, "-std=c99", "-O2", "-w", "-o", exe, os.path.join("tests", "cc1", "t_c99.c"), stub])
+    if r.returncode:
+        return ["the PC's build of t_c99.c failed: " + r.stderr.strip()[:300]]
+    rc = subprocess.run([exe]).returncode
+    if rc != 0:
+        return [f"t_c99 built by the PC: check {rc} failed"]
+    return t4_file("t_c99", "check(f.whole, 1);", "check(f.whole, 16);", 70, 145)
+
+
 def t4_m9():
     return t4_file("t_m9", "check(ptsum(mkpt(3, 4)), 7);", "check(ptsum(mkpt(3, 4)), 8);", 1, 102)
 
@@ -610,7 +714,7 @@ def s1():
             return [f"{path} missing (make stage1)"]
         bins += ["--bin", path]
     files = []
-    stems = ("hello", "t_exec", "t_m4", "t_m8", "t_m9", "t_m10", "t_m11", "t_m13", "t_m14", "t_ll")
+    stems = ("hello", "t_exec", "t_m4", "t_m8", "t_m9", "t_m10", "t_m11", "t_m13", "t_m14", "t_ll", "t_c99")
     for f in RUNTIME + [os.path.join("tests", "cc1", s + ".c") for s in stems]:
         files += ["--file", f]
     libs = "crt0.s rt.s libc.s libm.s"
@@ -641,7 +745,7 @@ def s1():
                 problems.append(f"device {dev} differs from the host's")
     # the device-built hello, t_m4 and t_m8, each run in a session of its own
     for stem, want in (("hello", 42), ("t_m4", 0), ("t_m8", 0), ("t_m9", 0), ("t_m10", 0), ("t_m11", 0),
-                       ("t_m13", 0), ("t_m14", 0), ("t_ll", 0)):
+                       ("t_m13", 0), ("t_m14", 0), ("t_ll", 0), ("t_c99", 0)):
         dev_bin = os.path.join(card, "bin", "d" + stem + ".bin")
         if os.path.exists(dev_bin):
             keep = os.path.join(REPO, o("d" + stem + ".bin"))
@@ -655,8 +759,8 @@ def s1():
 
 def main():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
-    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "libc.s")):
-        print("build/agon/lib/libc.s is missing: run make cross first")
+    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "agonc", "libc.s")):
+        print("build/agon/lib/agonc/libc.s is missing: run make cross first")
         return 1
     cases = [("T1 golden hello.ir", lambda: t1("--update" in sys.argv)),
              (f"D  diagnostics ({len(DIAG)} cases)", diagnostics),
@@ -671,9 +775,10 @@ def main():
         cases.append(("T4 t_m13.c (float and double, bit for bit) on the PC, then the emulator + guards", t4_m13))
         cases.append(("T4 t_m14.c (scopes, GCC's spellings, the default mode's C99) on the emulator + guards", t4_m14))
         cases.append(("T4 t_ll.c (long long, byte for byte) on the PC, then the emulator + guards", t4_ll))
+        cases.append(("T4 t_c99.c (the default mode's C99) on the PC, then the emulator + guards", t4_c99))
         if "--no-stage1" not in sys.argv:
-            cases.append(("S1 AgDev cc1+cc2+ld and device ez80asm build hello.c and t_exec, t_m4, t_m8, t_m9, t_m10, t_m11, t_m13, t_m14, t_ll"
-                          " on the emulator", s1))
+            cases.append(("S1 AgDev cc1+cc2+ld and device ez80asm build hello.c and t_exec, t_m4, t_m8, t_m9, t_m10, t_m11, t_m13, t_m14, t_ll,"
+                          " t_c99 on the emulator", s1))
     failed = 0
     for name, fn in cases:
         problems = fn()

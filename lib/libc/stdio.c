@@ -46,6 +46,12 @@
 #include <errno.h>
 #include <agon/mos.h>
 
+/* this file defines C89's scanf family, which the header's names mean
+ * only in strict mode, as well as C99's */
+#undef scanf
+#undef fscanf
+#undef sscanf
+
 /* The floating-point conversions (fp.c), which a function with a float
  * or double value brings into a program (ir_format.md 3, R): reached
  * through weak references, so that a program without floating point
@@ -54,7 +60,8 @@
 #pragma weak __fp_scan
 void __fp_print(void (*out)(void *, int), void *k, const void *d, int conv, int plus, int alt, int left,
                 int zero, int width, int prec);
-int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int size, void *dest);
+int __fp_scan(int (*get)(void *), void (*unget)(void *, int), void *src, int width, int size, void *dest,
+              int c99);
 
 /* The same for long long's ll conversions (ll.c): a function with a long
  * long value brings them in. */
@@ -487,9 +494,11 @@ static FILE *open_in(FILE *f, const char *name, const char *mode)
     int fa;
     int h;
     int i;
+    int saved;
     long size;
 
-    errno = EINVAL;
+    saved = errno;                      /* given back on success */
+    errno = EINVAL;                     /* for every bad-mode return below */
     if (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a')
         return NULL;
     plus = 0;
@@ -537,6 +546,7 @@ static FILE *open_in(FILE *f, const char *name, const char *mode)
     f->__size = BUFSIZ;
     f->__fsize = size;
     f->__base = mode[0] == 'a' ? size : 0;
+    errno = saved;
     return f;
 }
 
@@ -679,6 +689,14 @@ int setvbuf(FILE *f, char *buf, int mode, size_t size)
     if (f->__flags & F_MYBUF)
         free(f->__buf);
     f->__flags = f->__flags & ~F_MYBUF;
+    /* the keyboard is read a whole line at a time by MOS's line editor, so
+     * console input keeps a line buffer whatever is asked: unbuffered (as
+     * setbuf(stdin, NULL) asks) would give the editor no room */
+    if (f->__kind == K_CONIN && (mode == _IONBF || size < 2)) {
+        mode = _IOLBF;
+        buf = NULL;
+        size = CON_IN;
+    }
     if (mode == _IONBF) {
         buf = (char *)&f->__one;
         size = 1;
@@ -779,13 +797,14 @@ int putchar(int c)
 }
 
 /* Up to n-1 characters, stopping after a newline (kept); NULL if end of
- * file comes before any character (or n < 2). */
+ * file comes before any character, or n < 1. With n == 1 nothing is read
+ * and s is the empty string, as C89 4.9.7.2 has it. */
 char *fgets(char *s, int n, FILE *f)
 {
     int i;
     int c;
 
-    if (n < 2)
+    if (n < 1)
         return NULL;
     i = 0;
     while (i < n - 1) {
@@ -1054,11 +1073,16 @@ int fgetpos(FILE *f, fpos_t *pos)
 
 int fsetpos(FILE *f, const fpos_t *pos)
 {
+    int saved;
+
+    saved = errno;
+    errno = 0;
     if (fseek(f, *pos, SEEK_SET) != 0) {
-        if (errno == 0)
+        if (errno == 0)                 /* fseek gave no reason of its own */
             errno = EINVAL;
         return -1;
     }
+    errno = saved;
     return 0;
 }
 
@@ -1109,10 +1133,13 @@ int rename(const char *old, const char *new_name)
  * sign or prefix chosen, and then number lays out padding, prefix, zeros
  * and digits to the width. */
 
-/* Where formatted characters go: a stream, or memory (sprintf). */
+/* Where formatted characters go: a stream, or memory (sprintf), room
+ * more characters of it (snprintf's limit; past it, they are counted but
+ * not stored). */
 struct sink {
     FILE *f;
     char *out;
+    unsigned int room;
     int count;
 };
 
@@ -1120,9 +1147,10 @@ static void emit(struct sink *k, int c)
 {
     if (k->f != NULL) {
         put(c, k->f);
-    } else {
+    } else if (k->room > 0) {
         *k->out = c;
         k->out++;
+        k->room--;
     }
     k->count++;
 }
@@ -1214,19 +1242,20 @@ struct eight {
 };
 
 /* A conversion's length modifier, which *fmt points at: 'h', 'l', 'L', 0
- * for none, and 'q' for C99's ll and j (intmax_t is long long). */
+ * for none, and for C99's: 'q' for ll and j (intmax_t is long long), 'H'
+ * for hh (char), and 0 for z and t (size_t and ptrdiff_t are int-sized). */
 static int length(const char **fmt)
 {
     int c;
 
     c = **fmt;
-    if (c == 'l' && (*fmt)[1] == 'l') {
+    if ((c == 'l' || c == 'h') && (*fmt)[1] == c) {
         *fmt = *fmt + 2;
-        return 'q';
+        return c == 'l' ? 'q' : 'H';
     }
-    if (c == 'h' || c == 'l' || c == 'L' || c == 'j') {
+    if (c == 'h' || c == 'l' || c == 'L' || c == 'j' || c == 'z' || c == 't') {
         *fmt = *fmt + 1;
-        return c == 'j' ? 'q' : c;
+        return c == 'j' ? 'q' : c == 'z' || c == 't' ? 0 : c;
     }
     return 0;
 }
@@ -1239,7 +1268,9 @@ static void store_count(void *p, int size, int count)
     long v;
 
     v = count;
-    if (size == 'h') {
+    if (size == 'H') {
+        *(signed char *)p = (signed char)count;
+    } else if (size == 'h') {
         *(short *)p = (short)count;
     } else if (size == 'l' || size == 'q') {
         memcpy(p, &v, 4);
@@ -1256,15 +1287,16 @@ static void emit_to(void *k, int c)
     emit(k, c);
 }
 
-/* The conversions d i u x X o c s p n % and e f g E F G, the flags '-',
- * '0', '+', ' ' (the two for d i and the floating ones only; '+' wins)
- * and '#' (o x X and the floating ones), a width and a precision (either
- * may be '*'; a negative '*' width means '-', a negative '*' precision
- * means none), and the length modifiers 'h' (the int argument is
- * converted to short or unsigned short), 'l' (the argument is a long or
- * unsigned long) and C99's 'll' and 'j' (a long long or unsigned long
- * long) on d i u x X o n, and 'L' (long double, which is double) on the
- * floating ones. A null %s prints "(null)"; %p is at least 6 lowercase
+/* The conversions d i u x X o c s p n % and e f g E F G, with C99's a A,
+ * the flags '-', '0', '+', ' ' (the two for d i and the floating ones
+ * only; '+' wins) and '#' (o x X and the floating ones), a width and a
+ * precision (either may be '*'; a negative '*' width means '-', a
+ * negative '*' precision means none), and the length modifiers 'h' (the
+ * int argument is converted to short or unsigned short), 'l' (the
+ * argument is a long or unsigned long) and C99's 'hh' (converted to
+ * char), 'll' and 'j' (a long long or unsigned long long) and 'z' and 't'
+ * (size_t and ptrdiff_t, which are int-sized) on d i u x X o n, and 'L'
+ * (long double, which is double) on the floating ones. A null %s prints "(null)"; %p is at least 6 lowercase
  * hex digits; an unknown conversion character prints as itself; a format
  * ending in '%' just ends. A program without floating point or long long
  * has no such arguments, and prints nothing for them. */
@@ -1377,6 +1409,8 @@ static void format(struct sink *k, const char *fmt, va_list ap)
                     lv = va_arg(ap, long);
                 else if (size == 'h')
                     lv = (short)va_arg(ap, int);
+                else if (size == 'H')
+                    lv = (signed char)va_arg(ap, int);
                 else
                     lv = va_arg(ap, int);
                 sign[0] = lv < 0 ? '-' : plus;
@@ -1400,6 +1434,8 @@ static void format(struct sink *k, const char *fmt, va_list ap)
                     u = va_arg(ap, unsigned long);
                 else if (size == 'h')
                     u = (unsigned short)va_arg(ap, unsigned int);
+                else if (size == 'H')
+                    u = (unsigned char)va_arg(ap, unsigned int);
                 else
                     u = va_arg(ap, unsigned int);
                 n = to_digits(digits, u, base, set);
@@ -1419,6 +1455,8 @@ static void format(struct sink *k, const char *fmt, va_list ap)
         case 'E':
         case 'F':
         case 'G':
+        case 'a':
+        case 'A':
             /* the argument is always consumed, so the ones after it stay
              * in step even when nothing is printed */
             d = va_arg(ap, struct eight).b;
@@ -1483,9 +1521,28 @@ int vsprintf(char *s, const char *fmt, va_list ap)
 
     k.f = NULL;
     k.out = s;
+    k.room = ~0U;
     k.count = 0;
     format(&k, fmt, ap);
     *k.out = 0;
+    return k.count;
+}
+
+/* C99's: at most n - 1 characters stored and a NUL after them (nothing
+ * at all for n 0, when s may be null); the return is the length the
+ * whole output would have had, so a result of n or more means it was
+ * cut short. */
+int vsnprintf(char *s, size_t n, const char *fmt, va_list ap)
+{
+    struct sink k;
+
+    k.f = NULL;
+    k.out = s;
+    k.room = n > 0 ? n - 1 : 0;
+    k.count = 0;
+    format(&k, fmt, ap);
+    if (n > 0)
+        *k.out = 0;
     return k.count;
 }
 
@@ -1522,6 +1579,17 @@ int sprintf(char *s, const char *fmt, ...)
     return n;
 }
 
+int snprintf(char *s, size_t size, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vsnprintf(s, size, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
 /* ---- scanf -------------------------------------------------------------------------- */
 
 /* One input for the scanf family: a stream, or sscanf's string, read a
@@ -1532,6 +1600,7 @@ struct source {
     const char *s;
     int count;          /* characters consumed, for %n */
     int ended;          /* the input has run out */
+    int c99;            /* floating conversions read C99's forms too */
 };
 
 /* The next character, or EOF (which marks the input ended). */
@@ -1771,6 +1840,8 @@ static int scan(struct source *in, const char *fmt, va_list ap)
                     memcpy(va_arg(ap, void *), q, 8);
                 else if (size == 'h')
                     *va_arg(ap, short *) = (short)v;
+                else if (size == 'H')
+                    *va_arg(ap, signed char *) = (signed char)v;
                 else if (size == 'l')
                     *va_arg(ap, long *) = (long)v;
                 else
@@ -1818,10 +1889,11 @@ static int scan(struct source *in, const char *fmt, va_list ap)
                     out[n] = 0;
                 assigned++;
             }
-        } else if (conv == 'e' || conv == 'f' || conv == 'g' || conv == 'E' || conv == 'F' || conv == 'G') {
+        } else if (conv == 'e' || conv == 'f' || conv == 'g' || conv == 'E' || conv == 'F' || conv == 'G'
+                   || conv == 'a' || conv == 'A') {
             /* a program without floating point has nowhere to store one */
             if (!__fp_scan || !__fp_scan(get_from, unget_to, in, width > 0 ? width : 32767, size,
-                                          suppress ? NULL : va_arg(ap, void *)))
+                                          suppress ? NULL : va_arg(ap, void *), in->c99))
                 break;
             if (!suppress)
                 assigned++;
@@ -1837,18 +1909,44 @@ static int scan(struct source *in, const char *fmt, va_list ap)
     return assigned;
 }
 
+/* The stream f, or (f null) the string s; c99, whether the floating
+ * conversions read C99's hexadecimal, inf and nan. */
+static int scan_from(FILE *f, const char *s, int c99, const char *fmt, va_list ap)
+{
+    struct source in;
+
+    in.f = f;
+    in.s = s;
+    in.count = 0;
+    in.ended = 0;
+    in.c99 = c99;
+    return scan(&in, fmt, ap);
+}
+
+/* C99's va_list forms */
+int vfscanf(FILE *f, const char *fmt, va_list ap)
+{
+    return scan_from(f, NULL, 1, fmt, ap);
+}
+
+int vscanf(const char *fmt, va_list ap)
+{
+    return scan_from(stdin, NULL, 1, fmt, ap);
+}
+
+int vsscanf(const char *s, const char *fmt, va_list ap)
+{
+    return scan_from(NULL, s, 1, fmt, ap);
+}
+
+/* C89's: "inf" is no number, as C89 requires */
 int scanf(const char *fmt, ...)
 {
     va_list ap;
-    struct source in;
     int n;
 
     va_start(ap, fmt);
-    in.f = stdin;
-    in.s = NULL;
-    in.count = 0;
-    in.ended = 0;
-    n = scan(&in, fmt, ap);
+    n = scan_from(stdin, NULL, 0, fmt, ap);
     va_end(ap);
     return n;
 }
@@ -1856,15 +1954,10 @@ int scanf(const char *fmt, ...)
 int fscanf(FILE *f, const char *fmt, ...)
 {
     va_list ap;
-    struct source in;
     int n;
 
     va_start(ap, fmt);
-    in.f = f;
-    in.s = NULL;
-    in.count = 0;
-    in.ended = 0;
-    n = scan(&in, fmt, ap);
+    n = scan_from(f, NULL, 0, fmt, ap);
     va_end(ap);
     return n;
 }
@@ -1872,15 +1965,45 @@ int fscanf(FILE *f, const char *fmt, ...)
 int sscanf(const char *s, const char *fmt, ...)
 {
     va_list ap;
-    struct source in;
     int n;
 
     va_start(ap, fmt);
-    in.f = NULL;
-    in.s = s;
-    in.count = 0;
-    in.ended = 0;
-    n = scan(&in, fmt, ap);
+    n = scan_from(NULL, s, 0, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+/* C99's, which <stdio.h> makes scanf, fscanf and sscanf mean outside
+ * strict mode */
+int __scanf99(const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = scan_from(stdin, NULL, 1, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+int __fscanf99(FILE *f, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = scan_from(f, NULL, 1, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+int __sscanf99(const char *s, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = scan_from(NULL, s, 1, fmt, ap);
     va_end(ap);
     return n;
 }

@@ -38,7 +38,7 @@ runs in the 32 KB at `0x0B0000`, so each pass can have all of user memory.
 [Releases page](https://github.com/ahemphil/agonc/releases) has a zip of
 the compiler, built and tested. Unzip it onto the root of the Agon's
 SD card, merging with the folders already there: it adds `/mos/agonc.bin`,
-`/bin/agonc/`, `/lib/`, `/usrlib/`, `/tmp/` and `/bin/ez80asm.bin`, and
+`/bin/agonc/`, `/lib/agonc/`, `/usrlib/`, `/tmp/` and `/bin/ez80asm.bin`, and
 nothing else ([the manual's quick start](docs/manual/01-quick-start.md)).
 
 | Path | You get | You need |
@@ -130,15 +130,15 @@ everything the Agon needs:
 |---|---|
 | `/bin/agonc/` | stage 1's four passes; the bootstrap replaces them with stage 2 |
 | `/bin/ez80asm.bin` | the Agon's assembler |
-| `/lib/` | the C headers and the runtime (`crt0.s`, `rt.s`); the bootstrap adds the library, `libc.s`, `libm.s` and `libagon.s`, and the indexes that make links fast (`.idx`) |
+| `/lib/agonc/` | the C headers and the runtime (`crt0.s`, `rt.s`); the bootstrap adds the library, `libc.s`, `libm.s` and `libagon.s`, and the indexes that make links fast (`.idx`) |
 | `/usrlib/` | empty; for your own libraries |
 | `/mos/` | empty; the bootstrap puts the driver here |
 | `/agonc/` | the compiler's sources (`src/`, `lib/`, `tools/`), the bootstrap (`bootstrap/`), work folders (`out/`, `s2/`, `s3/`) and `licenses/` |
 
 **Put it on the Agon.** Copy the *contents* of `build/sdcard/` to the root
 of the Agon's SD card. This adds folders and files; the only things it can
-replace are `/bin/ez80asm.bin` and files of the same names in `/lib` and
-`/mos`.
+replace are `/bin/ez80asm.bin` and files of the same names in `/lib/agonc`
+and `/mos`.
 
 **Or use the emulator.**
 
@@ -170,8 +170,8 @@ exec /agonc/bootstrap/1-stage1.txt
 ```
 
 It runs stage 1's passes directly, 48 times, to compile the C library's
-eleven units, then `concat` (which joins them into `/lib/libc.s` and
-`/lib/libm.s`), then `ld --index` (the libraries' indexes), then
+eleven units, then `concat` (which joins them into `/lib/agonc/libc.s` and
+`/lib/agonc/libm.s`), then `ld --index` (the libraries' indexes), then
 `compare`, then the driver, which it writes to
 `/mos/agonc.bin`. It works from `/` and names every file by its full path,
 because MOS 3 runs a program given by its full path only from there. The
@@ -195,7 +195,7 @@ agonc -o s2/cc1.bin @bootstrap/cc1.rsp
 ```
 
 where `bootstrap/cc1.rsp` lists `cc1`'s sources and options. First it
-builds `/lib/libagon.s`, the MOS and VDU interface, and its index. The
+builds `/lib/agonc/libagon.s`, the MOS and VDU interface, and its index. The
 compiler says nothing when all is well, so again only ez80asm is heard
 from, once per program (`Wrote s2/cc1.bin, 139234 bytes`). Time: about 6½ minutes (2
 minutes).
@@ -231,7 +231,7 @@ A difference would print `DIFFERENT: ...` and stop the script. Time:
 about 12 minutes (3 minutes).
 
 **Afterwards.** The compiler is installed: the driver in `/mos`, the passes
-in `/bin/agonc`, the library in `/lib`. `/agonc/out`, `/agonc/s2` and
+in `/bin/agonc`, the library in `/lib/agonc`. `/agonc/out`, `/agonc/s2` and
 `/agonc/s3` can be deleted; keep `/agonc/src` if you want the sources on
 the Agon.
 
@@ -251,8 +251,8 @@ tree of the finished compiler, ready to copy to the root of a card:
 | `/mos/agonc.bin` | the driver |
 | `/bin/agonc/cpp.bin`, `cc1.bin`, `cc2.bin`, `ld.bin` | the passes |
 | `/bin/ez80asm.bin` | the assembler |
-| `/lib/` | headers, runtime, `libc.s`, `libm.s` (the floating-point and `long long` part) and `libagon.s` (the MOS and VDU interface), and their indexes (`.idx`) |
-| `/usrlib/`, `/tmp/` | empty |
+| `/lib/agonc/` | headers, runtime, `libc.s`, `libm.s` (the floating-point and `long long` part) and `libagon.s` (the MOS and VDU interface), and their indexes (`.idx`) |
+| `/usrlib/`, `/tmp/` | empty (agonc keeps its own intermediate files in `/tmp/agonc`) |
 
 These files are byte-for-byte identical to the ones the bootstrap builds on
 the Agon (section 8 gives their checksums), which the test suite checks.
@@ -263,19 +263,19 @@ The finished compiler, from either path, should be exactly these files:
 
 | File | Size (bytes) | SHA-256 |
 |---|---:|---|
-| `/mos/agonc.bin` | 18,473 | `b5e2c73962d43e858271470753918a35db1536d99f95bb8c7753c6d845ac3043` |
-| `/bin/agonc/cpp.bin` | 50,017 | `f0f211e04e5736169ef5aac8507d9fcf6d915ed7170e1ed7bc900225004d234a` |
-| `/bin/agonc/cc1.bin` | 139,389 | `2f191991291d0da26bc4fc37d4da07c843f2cf0c05cffd983ade01e3b85ca5a3` |
-| `/bin/agonc/cc2.bin` | 81,372 | `140dd5138826df28337d8d1fc1493e3b32e7404943c16d4665cdce2491d63b39` |
-| `/bin/agonc/ld.bin` | 33,407 | `ead571156d39de7dc90c07ae48600495e740fcb616858c7512ad3602adadd778` |
-| `/lib/libc.s` | 177,125 | `b8907a2f77a3306a121c7826df3b2be27c9e0ac39d34795fb67e6fc44f3d9ab2` |
-| `/lib/libm.s` | 417,473 | `cb37bcc0211433be187283908ead145be8037d76049f4e41807782171e8f3bf7` |
-| `/lib/libagon.s` | 156,467 | `1db8c4d08d324fabff7e70676c1927e270c97e886742e77c407a88b6d313cc40` |
-| `/lib/crt0.idx` | 729 | `0beaf11d990e992ca14405210adb09113061359a377d486086a3fda03d672626` |
-| `/lib/rt.idx` | 3,030 | `e48b5217b0bf84d12143f3c853c2c71dcc2f325ec22286fe8a672e041eabf05d` |
-| `/lib/libc.idx` | 22,630 | `edab7640b57214a19f7f5a5f4f74788032c216f52297f786b687d155550fbd95` |
-| `/lib/libm.idx` | 40,496 | `b46fee9a1bb82b69bbc8071e91bbc7fbb82fde59e7f2b3cc8e2fd291e1dc96bb` |
-| `/lib/libagon.idx` | 33,195 | `7186c1fe72ff8f2896dd3cc66745a59c23f4f1b19c657be7eeda21c6f340e5ff` |
+| `/mos/agonc.bin` | 18,716 | `bb4ea0506433378e46ea59ee7ecc436988040b59af31afc453d106747bf84cdb` |
+| `/bin/agonc/cpp.bin` | 52,670 | `3313a9ed796ede02b3206adc4f4a1951263699f2d18033c1bdff0e9c5830909a` |
+| `/bin/agonc/cc1.bin` | 151,363 | `61bc8477f7f7da18605af4e48c174faacae8d10b75058890c5da98f0d019e8b7` |
+| `/bin/agonc/cc2.bin` | 81,700 | `2d4bcf9ee5cc386c5d52a1523b9a92d6b59e328da99d6ad8face9dee93d73e2c` |
+| `/bin/agonc/ld.bin` | 33,839 | `c54e98d0fb023aa2cba30582d3ef54e5605e891484ec68795fdc8a9aca2a370b` |
+| `/lib/agonc/libc.s` | 184,156 | `4a36745b881226ef51487b03dbb933cf9481d6f67e6e746f8990a5c8b914dbb0` |
+| `/lib/agonc/libm.s` | 715,413 | `8f3628b3a7d7ca6e5004c7500ccce54503dd5f01b1accceff6a2cbc1448c6948` |
+| `/lib/agonc/libagon.s` | 156,089 | `f1cd33da1abba1bcc134f56453a815c4b0488dc5b8358fae558f71fb9367b4d2` |
+| `/lib/agonc/crt0.idx` | 729 | `d564384a2a734244a672ddff20794d93e26b98cb391a9c6d46f363b2eef1dd68` |
+| `/lib/agonc/rt.idx` | 2,636 | `9ac6741ec40979e7f807c4555d1ad3cc734b50571dd9f516d029ff3be52c5888` |
+| `/lib/agonc/libc.idx` | 24,083 | `3f99b45cb0cbbde474c65c5ced180dfe5228c431c8a584051844303d8ba9c814` |
+| `/lib/agonc/libm.idx` | 83,389 | `25c85261f41d530dabe1bab46ce8e1823e7adb4f68233f5d03373d311fea8f30` |
+| `/lib/agonc/libagon.idx` | 33,090 | `44e84fdc9bee8953ea34da31fb7cc57cc3f4b10ef97c37eb81b6b33bc2302e16` |
 
 On a PC: `sha256sum` (Linux), `shasum -a 256` (macOS), or
 `Get-FileHash` (PowerShell). The bootstrap's last script already checks
@@ -308,7 +308,7 @@ hello
 lists them, `-time` shows how long each pass took, and [docs/driver.md](docs/driver.md)
 has the details. `-o` refuses a source file's name, so a slip such as
 `agonc -o hello.c hello.c` cannot overwrite your program. The language is
-C89 with a few of C99's additions; `-ansi` is strict C89
+C99 but for variable-length arrays and complex numbers; `-ansi` is strict C89
 ([docs/c89_spec.md](docs/c89_spec.md) §1).
 
 ## 10. Troubleshooting

@@ -97,7 +97,7 @@ static int is_type_kw(int k)
 {
     return k == KW_VOID || k == KW_CHAR || k == KW_INT || k == KW_UNSIGNED || k == KW_SIGNED
         || k == KW_SHORT || k == KW_LONG || k == KW_FLOAT || k == KW_DOUBLE || k == KW_CONST
-        || k == KW_VOLATILE || k == KW_STRUCT || k == KW_UNION || k == KW_ENUM;
+        || k == KW_VOLATILE || k == KW_STRUCT || k == KW_UNION || k == KW_ENUM || k == KW_BOOL;
 }
 
 /* Whether the current token starts a declaration: a type keyword, a
@@ -108,7 +108,7 @@ int is_type_start(void)
     if (tok == TK_IDENT)
         return typedef_type(tok_name) >= 0 && peek() != TK_P + ':';
     return is_type_kw(tok) || tok == KW_STATIC || tok == KW_EXTERN || tok == KW_TYPEDEF
-        || tok == KW_AUTO || tok == KW_REGISTER;
+        || tok == KW_AUTO || tok == KW_REGISTER || tok == KW_INLINE;
 }
 
 /* At a '(': whether a type name follows, which makes it a cast or a
@@ -122,6 +122,7 @@ int is_type_start_after_paren(void)
 }
 
 static int declared_tag;        /* the last decl_specs named or defined a tag */
+static int decl_inline;         /* the last decl_specs had C99's inline */
 static int in_params;           /* parsing a parameter list (register is allowed) */
 
 /* "struct" or "union" [tag] ["{" members "}"], at the keyword; returns
@@ -190,13 +191,15 @@ static int struct_spec(void)
         for (;;) {
             mname = -1;
             mt = tok == TK_P + ':' ? base : declarator(base, &mname);
+            if (tags[tg].flex)
+                error("a flexible array member must be the last member");
             if (accept(TK_P + ':')) {
-                /* a bit-field: int, signed or unsigned int, or (an extension)
-                 * char, short or long; at most 24 bits */
+                /* a bit-field: int, signed or unsigned int, _Bool (1 bit at
+                 * most), or (an extension) char, short or long; at most 24 bits */
                 w = const_expr();
                 if (!is_integer(mt))
                     error("a bit-field must have an integer type");
-                else if (w < 0 || w > 8 * type_size(mt) || w > 24)
+                else if (w < 0 || w > 8 * type_size(mt) || w > 24 || (types[mt].kind == TY_BOOL && w > 1))
                     error("a bit-field wider than its type (or than 24 bits) or of negative width");
                 else if (w == 0 && mname >= 0)
                     error("a named bit-field of width 0");
@@ -208,8 +211,25 @@ static int struct_spec(void)
                 error("a struct member needs a name");
             else if (types[mt].kind == TY_FUNC)
                 error("a struct member cannot be a function");
-            else if (type_size(mt) == 0)
+            else if (!strict && types[mt].kind == TY_ARRAY && types[mt].count < 0
+                     && type_size(types[mt].base) > 0) {
+                /* C99's flexible array member: "T m[];" last, after a
+                 * member, taking no space (sizeof stops before it) */
+                if (is_union)
+                    error("a flexible array member in a union");
+                else if (n == 0)
+                    error("a flexible array member needs a member before it");
+                else if (find_member(tg, mname) >= 0)
+                    error_s("duplicate member ", name_str(mname));
+                else {
+                    add_member(tg, mname, mt);
+                    n++;
+                    tags[tg].flex = 1;
+                }
+            } else if (type_size(mt) == 0)
                 error_s("member of void or incomplete type: ", name_str(mname));
+            else if (is_struct(mt) && tags[types[mt].base].flex)
+                error("a struct with a flexible array member cannot be a member");
             else if (find_member(tg, mname) >= 0)
                 error_s("duplicate member ", name_str(mname));
             else if (n >= 127)
@@ -339,6 +359,11 @@ static int spec_type(int base, int other, int sign, int nshort, int nlong)
             error("'void' with 'short', 'long', 'signed' or 'unsigned'");
         return T_VOID;
     }
+    if (base == T_BOOL) {
+        if (sign || nshort || nlong)
+            error("'_Bool' with 'short', 'long', 'signed' or 'unsigned'");
+        return T_BOOL;
+    }
     if (base == T_FLOAT) {
         if (sign || nshort || nlong)
             error("'float' with 'short', 'long', 'signed' or 'unsigned'");
@@ -391,9 +416,13 @@ int decl_specs(int *sclass)
     other = 0;
     qual = 0;
     declared_tag = 0;
+    decl_inline = 0;
     for (;;) {
-        if (tok == KW_STATIC || tok == KW_EXTERN || tok == KW_TYPEDEF || tok == KW_AUTO
-            || tok == KW_REGISTER) {
+        if (tok == KW_INLINE) {
+            decl_inline = 1;            /* its linkage: inline_linkage */
+            next();
+        } else if (tok == KW_STATIC || tok == KW_EXTERN || tok == KW_TYPEDEF || tok == KW_AUTO
+                   || tok == KW_REGISTER) {
             if (*sclass != SC_NONE)
                 error("more than one storage class");
             if (tok == KW_AUTO || tok == KW_REGISTER) {
@@ -423,10 +452,10 @@ int decl_specs(int *sclass)
         } else if (tok == KW_LONG) {
             nlong++;
             next();
-        } else if (tok == KW_INT || tok == KW_CHAR || tok == KW_VOID) {
+        } else if (tok == KW_INT || tok == KW_CHAR || tok == KW_VOID || tok == KW_BOOL) {
             if (base >= 0)
                 error("more than one type in a declaration");
-            base = tok == KW_INT ? T_INT : tok == KW_CHAR ? T_CHAR : T_VOID;
+            base = tok == KW_INT ? T_INT : tok == KW_CHAR ? T_CHAR : tok == KW_BOOL ? T_BOOL : T_VOID;
             next();
         } else if (tok == KW_STRUCT || tok == KW_UNION || tok == KW_ENUM) {
             if (base >= 0)
@@ -536,7 +565,7 @@ static int param_list(int ret)
                 error("expected a parameter name");
                 break;
             }
-            if (n >= MAX_PNAMES)
+            if (n >= MAX_ARGS_CALL)
                 fatal("more than 31 parameters");
             pnames[n] = tok_name;
             n++;
@@ -613,6 +642,8 @@ static int suffixes(int base)
             error("array of void");
         if (is_struct(t) && type_size(t) == 0)
             error("array of an incomplete struct");
+        if (is_struct(t) && tags[types[t].base].flex)
+            error("array of a struct with a flexible array member");
         if (types[t].kind == TY_ARRAY && types[t].count < 0)
             error("only an array's first dimension may be omitted");
         return array_of(t, n);
@@ -701,46 +732,356 @@ int parse_type_name(void)
     return t;
 }
 
-/* ---- static initialisers ------------------------------------------------------------ */
+/* ---- initialisers ------------------------------------------------------------------- */
 
-/* Items are written as they are parsed, inside the D that define_var has
- * already opened (IR 2 streams initialisers, ir_format.md 3).
+/* An object's initialiser (C89 3.5.7, C99 6.7.8) is gathered as records,
+ * each some bytes at an offset in the object, held in order of offset,
+ * and written as data items (ir_format.md 3) when it is complete, the gaps
+ * between them and the rest of the object as Z. Holding them is what
+ * C99's designators need: `{ [5] = 1, [2] = 3 }` and `{ .y = 1, .x = 2 }`
+ * go back, and a later initialiser of the same subobject replaces the
+ * earlier one. A record is one of
+ *   'B' 'W' 'T'  an integer of 1, 2 or 3 bytes, a its value;
+ *   'A'          an address constant, a the symbol and b the offset;
+ *   'S'          len bytes of a string, at rec_pool + a;
+ *   'X'          any other item (a Q or an H), its text at rec_pool + a;
+ *   'D'          in a local aggregate's template or a compound literal in
+ *                a function, an element that is not a constant: zeros in
+ *                the template, and the store after the copy, of type a
+ *                and expression b (whose nodes are kept until then).
+ * A record placed over others replaces what it covers: a string's bytes
+ * are trimmed to what is left; anything else (a scalar, or a union's
+ * other member) goes whole.
  *
- * The parse follows C89 3.5.7: init_any takes one object; an aggregate's
- * elements or members go through init_members, inside braces or, with
- * the braces elided, as many initialisers as it has elements. Each
- * returns the bytes it wrote, so that the caller can pad with zero bytes
- * (Z) to the next member's offset and to the end of the object.
- *
- * A local aggregate's initialiser in the default mode may have elements
- * that are not constants (C99 allows them; C89 does not). Its template
- * holds zeros for them, and they are stored after the template is copied
- * in: each one's position in the object, type and expression (whose nodes
- * are kept until then). init_base is the position of the aggregate that
- * init_members is filling. */
-#define MAX_DEFERRED 64
-static int local_template;           /* the template of a local aggregate, in the default mode */
-static int init_base;
-static int ndeferred;
-static int deferred_off[MAX_DEFERRED];
-static int deferred_type[MAX_DEFERRED];
-static int deferred_node[MAX_DEFERRED];
-static int keep_nodes;               /* static_item deferred its expression: init_any keeps its nodes */
+ * The records are a stack of frames, one per object being initialised:
+ * an object's, and above it, while one of its initialisers holds a
+ * compound literal, the literal's (compound_literal). A frame whose D is
+ * already open (a defined object's, or a local aggregate's template) is
+ * the bottom one; when the table or the pool fills, it writes out the
+ * records that lie before the one being placed, and nothing may then go
+ * before them (rec_flushed): designators that far back are refused, a
+ * limit on an initialiser of more than MAX_RECS items. */
+#define MAX_RECS 512
+#define REC_POOL 4096
+
+struct rec {
+    int off;
+    int len;
+    int a;
+    int b;
+    char kind;
+};
+
+static struct rec recs[MAX_RECS];
+static int nrecs;
+static char rec_pool[REC_POOL];
+static int pool_used;
+static int frame_base;               /* the current frame's first record */
+static int frame_open;               /* its D is open, so it may write early */
+static int rec_flushed;              /* the bottom frame: the bytes written so far */
+static int local_template;           /* 'D' records allowed (a function's template, in the default mode) */
+static int keep_nodes;               /* static_item kept its expression: init_any keeps its nodes */
 static int pending_init = -1;        /* braces elided: an expression already read for the first scalar */
 
-/* One data item, a line of IR. */
-static void init_item(char *s)
+/* ---- writing the records ---- */
+
+/* Compound literals completed while an object's D is open: their D
+ * records as text, written after its E (rec_kept_flush), as wide strings
+ * are (emit.c). */
+#define KEEP 4096
+static char kept[KEEP];
+static int kept_used;
+static int keeping;                  /* rec_line goes to kept */
+
+static void rec_line(char *s)
 {
-    write_ir(s);
+    int n;
+
+    if (!keeping) {
+        write_ir(s);
+        return;
+    }
+    n = strlen(s);
+    if (kept_used + n + 2 > KEEP)
+        fatal("compound literals too large in one initialiser (a cc1 table limit)");
+    strcpy(kept + kept_used, s);
+    kept_used = kept_used + n;
+    kept[kept_used] = '\n';
+    kept_used++;
+    kept[kept_used] = 0;
 }
 
-/* An S item: the bytes of a string, no terminator. */
-static void string_item(char *bytes, int len)
+/* The compound literals kept, after the E of the object whose D was open. */
+static void rec_kept_flush(void)
 {
-    out_str(ir_out, "S ");                 /* in pieces: the text can be long */
-    out_str(ir_out, ir_string(bytes, len));
-    out_str(ir_out, "\n");
+    if (kept_used > 0)
+        out_str(ir_out, kept);
+    kept_used = 0;
+    kept[0] = 0;
 }
+
+/* n zero bytes, if n > 0 */
+static void rec_zeros(int n)
+{
+    char buf[24];
+
+    if (n > 0) {
+        sprintf(buf, "Z %d", n);
+        rec_line(buf);
+    }
+}
+
+/* Record i as its data item. */
+static void rec_item(int i)
+{
+    char buf[120];
+    char *s;
+    int v;
+    int len;
+
+    v = recs[i].a;
+    switch (recs[i].kind) {
+    case 'B':
+        sprintf(buf, "B %d", ((v & 255) ^ 128) - 128);
+        break;
+    case 'W':
+        sprintf(buf, "W %d", ((v & 65535) ^ 32768) - 32768);
+        break;
+    case 'T':
+        sprintf(buf, "T %d", v);
+        break;
+    case 'A':
+        sprintf(buf, "A %s %d", ir_sym(v), wrap24(recs[i].b));
+        break;
+    case 'X':
+        rec_line(rec_pool + v);
+        return;
+    case 'D':
+        sprintf(buf, "Z %d", recs[i].len);
+        break;
+    default:                            /* 'S': the text can be long, so in pieces */
+        s = ir_string(rec_pool + v, recs[i].len);
+        len = strlen(s);
+        if (!keeping) {
+            out_str(ir_out, "S ");
+            out_str(ir_out, s);
+            out_str(ir_out, "\n");
+            return;
+        }
+        if (kept_used + len + 4 > KEEP)
+            fatal("compound literals too large in one initialiser (a cc1 table limit)");
+        strcpy(kept + kept_used, "S ");
+        strcpy(kept + kept_used + 2, s);
+        kept_used = kept_used + len + 2;
+        kept[kept_used] = '\n';
+        kept_used++;
+        kept[kept_used] = 0;
+        return;
+    }
+    rec_line(buf);
+}
+
+/* The current frame's records from first to last (not included), from
+ * the object's byte at, as data items with the gaps zero-filled; returns
+ * where they end. */
+static int rec_write(int first, int last, int at)
+{
+    int i;
+
+    for (i = first; i < last; i++) {
+        rec_zeros(recs[i].off - at);
+        rec_item(i);
+        at = recs[i].off + recs[i].len;
+    }
+    return at;
+}
+
+/* ---- placing records ---- */
+
+/* Moves the pool's live bytes (the 'S' and 'X' records') down, freeing
+ * what records written or replaced held. Each is moved in order of its
+ * place in the pool, so a move never overwrites one not yet moved. */
+static void pool_compact(void)
+{
+    int done;
+    int i;
+    int best;
+    int len;
+    int last;
+
+    done = 0;
+    last = -1;
+    for (;;) {
+        best = -1;
+        for (i = 0; i < nrecs; i++)
+            if ((recs[i].kind == 'S' || recs[i].kind == 'X') && recs[i].a > last
+                && (best < 0 || recs[i].a < recs[best].a))
+                best = i;
+        if (best < 0)
+            break;
+        last = recs[best].a;
+        len = recs[best].kind == 'S' ? recs[best].len : (int)strlen(rec_pool + recs[best].a) + 1;
+        memmove(rec_pool + done, rec_pool + recs[best].a, len);
+        recs[best].a = done;
+        done = done + len;
+    }
+    pool_used = done;
+}
+
+/* The table or the pool is full, as a record is to be placed at off: the
+ * bottom frame writes out the records that end at or before off (a
+ * positional initialiser goes on from off; a designator may still come
+ * back to the gap after them). */
+static void rec_full(int off)
+{
+    int k;
+
+    if (frame_base != 0 || !frame_open)
+        fatal("an initialiser too large for agonc to hold (more than 512 items, or 4096 bytes of strings)");
+    k = 0;
+    while (k < nrecs && recs[k].off + recs[k].len <= off) {
+        if (recs[k].kind == 'D')
+            fatal("a local aggregate's initialiser too large for agonc to hold with elements that are "
+                  "not constants (more than 512 items)");
+        k++;
+    }
+    if (k == 0)
+        fatal("an initialiser too large for agonc to hold (more than 512 items, or 4096 bytes of strings)");
+    rec_flushed = rec_write(0, k, rec_flushed);
+    memmove(recs, recs + k, (nrecs - k) * sizeof(struct rec));
+    nrecs = nrecs - k;
+    pool_compact();
+}
+
+/* Room for a record at off (and a split one) and n bytes of pool, made by
+ * writing out early if it must: before any of the pool is taken, since
+ * writing out moves what the pool holds. */
+static void rec_room(int off, int n)
+{
+    if (nrecs >= MAX_RECS - 1 || pool_used + n > REC_POOL)
+        rec_full(off);
+    if (nrecs >= MAX_RECS - 1 || pool_used + n > REC_POOL)
+        fatal("an initialiser too large for agonc to hold (more than 512 items, or 4096 bytes of strings)");
+}
+
+/* n bytes of pool, which rec_room has made room for; returns where. */
+static int pool_take(int n)
+{
+    int p;
+
+    p = pool_used;
+    pool_used = pool_used + n;
+    return p;
+}
+
+/* Opens a gap at index i of the table. */
+static void rec_insert(int i)
+{
+    memmove(recs + i + 1, recs + i, (nrecs - i) * sizeof(struct rec));
+    nrecs++;
+}
+
+/* A record of len bytes at off in the current frame, replacing what it
+ * covers; returns its index, or -1 if it cannot be placed. */
+static int rec_put(int off, int len, int kind, int a, int b)
+{
+    int i;
+    int end;
+    int tail;
+
+    rec_room(off, 0);
+    if (frame_base == 0 && frame_open && off < rec_flushed) {
+        error("a designator goes back before what agonc has already written of this initialiser "
+              "(it holds 512 items)");
+        return -1;
+    }
+    end = off + len;
+    /* i: the first record that ends after off; those before it stay */
+    i = nrecs;
+    while (i > frame_base && recs[i - 1].off + recs[i - 1].len > off)
+        i--;
+    tail = -1;
+    while (i < nrecs && recs[i].off < end) {
+        if (recs[i].kind == 'S' && recs[i].off < off) {
+            /* a string's head stays, and its tail if it reaches past end
+             * (then nothing else can overlap) */
+            tail = recs[i].off + recs[i].len > end;
+            if (tail) {
+                rec_insert(i + 1);
+                recs[i + 1] = recs[i];
+                recs[i + 1].a = recs[i].a + (end - recs[i].off);
+                recs[i + 1].len = recs[i].off + recs[i].len - end;
+                recs[i + 1].off = end;
+            }
+            recs[i].len = off - recs[i].off;
+            i++;
+            if (tail)
+                break;
+            continue;
+        }
+        if (recs[i].kind == 'S' && recs[i].off + recs[i].len > end) {
+            /* a string's tail stays */
+            recs[i].a = recs[i].a + (end - recs[i].off);
+            recs[i].len = recs[i].off + recs[i].len - end;
+            recs[i].off = end;
+            break;
+        }
+        memmove(recs + i, recs + i + 1, (nrecs - i - 1) * sizeof(struct rec));
+        nrecs--;
+    }
+    rec_insert(i);
+    recs[i].off = off;
+    recs[i].len = len;
+    recs[i].kind = kind;
+    recs[i].a = a;
+    recs[i].b = b;
+    return i;
+}
+
+/* An item's text (a Q or an H) as an 'X' record. */
+static void rec_text(int off, int len, char *text)
+{
+    int p;
+
+    rec_room(off, strlen(text) + 1);
+    p = pool_take(strlen(text) + 1);
+    strcpy(rec_pool + p, text);
+    rec_put(off, len, 'X', p, 0);
+}
+
+/* A string's len bytes as an 'S' record. */
+static void rec_string(int off, char *bytes, int len)
+{
+    int p;
+
+    if (len == 0)
+        return;
+    rec_room(off, len);
+    p = pool_take(len);
+    memcpy(rec_pool + p, bytes, len);
+    rec_put(off, len, 'S', p, 0);
+}
+
+/* The bits mask of the byte at off become bits, the rest kept: a
+ * bit-field's share of a byte (a 'B' record, made if the byte had none). */
+static void rec_bits(int off, int mask, int bits)
+{
+    int i;
+
+    i = nrecs;
+    while (i > frame_base && recs[i - 1].off > off)
+        i--;
+    if (i == frame_base || recs[i - 1].kind != 'B' || recs[i - 1].off != off) {
+        i = rec_put(off, 1, 'B', 0, 0);
+        if (i < 0)
+            return;
+    } else {
+        i--;
+    }
+    recs[i].a = (recs[i].a & ~mask) | (bits & mask);
+}
+
+/* ---- the items ---- */
 
 /* Whether n is an address constant (C89 3.4): a static object's or
  * function's address plus a constant. is_lvalue says n stands for an object,
@@ -779,19 +1120,19 @@ static int address_constant(int n, int is_lvalue, int *g, int *off)
     return 0;
 }
 
-/* One scalar item of type t from expression n: a constant, or an address
- * constant (&obj, an array or string, either plus or minus a constant).
- * The item holds the bytes: Q a float's bits or a long, H a double's or
- * long long's eight bytes, B, W or T an integer of 1, 2 or 3 bytes (its
- * low bytes, written as a signed value), A an address. The casts that
- * convert leaves are looked through, and an integer constant's narrowing
- * is left to the item's own truncation. In a local aggregate's template
- * a non-constant is deferred: Z bytes here, stored by code later. */
-static void static_item(int n, int t)
+/* One scalar of type t at off from expression n: a constant, or an
+ * address constant (&obj, an array or string, either plus or minus a
+ * constant). The item holds the bytes: Q a float's bits or a long, H a
+ * double's or long long's eight bytes, B, W or T an integer of 1, 2 or 3
+ * bytes (its low bytes, written as a signed value), A an address. The
+ * casts that convert leaves are looked through, and an integer constant's
+ * narrowing is left to the item's own truncation. In a template a
+ * non-constant is a 'D' record, stored by code after the copy. */
+static void static_item(int n, int t, int off)
 {
     char buf[120];
-    int off;
     int g;
+    int k;
     int op;
     int whole;
     struct i32 v;
@@ -815,7 +1156,7 @@ static void static_item(int n, int t)
     }
     if (op == EN_NUM && types[t].kind == TY_FLOAT) {
         sprintf(buf, "Q %lu", fbits[n].lo);
-        init_item(buf);
+        rec_text(off, 4, buf);
         return;
     }
     if (op == EN_NUM && is_mem8(t)) {
@@ -823,7 +1164,7 @@ static void static_item(int n, int t)
         sprintf(buf, "H %02lx%02lx%02lx%02lx%02lx%02lx%02lx%02lx", fbits[n].lo & 255, fbits[n].lo >> 8 & 255,
                 fbits[n].lo >> 16 & 255, fbits[n].lo >> 24 & 255, fbits[n].hi & 255, fbits[n].hi >> 8 & 255,
                 fbits[n].hi >> 16 & 255, fbits[n].hi >> 24 & 255);
-        init_item(buf);
+        rec_text(off, 8, buf);
         return;
     }
     if (op == EN_NUM) {
@@ -831,43 +1172,23 @@ static void static_item(int n, int t)
             i32_join(&v, nodes[n].hi8, nodes[n].val);
             strcpy(buf, "Q ");
             i32_str(buf + 2, &v, !is_unsigned(t));
-        } else if (type_size(t) == 1) {
-            sprintf(buf, "B %d", ((nodes[n].val & 255) ^ 128) - 128);
-        } else if (type_size(t) == 2) {
-            sprintf(buf, "W %d", ((nodes[n].val & 65535) ^ 32768) - 32768);
+            rec_text(off, 4, buf);
         } else {
-            sprintf(buf, "T %d", nodes[n].val);
+            k = type_size(t);
+            rec_put(off, k, k == 1 ? 'B' : k == 2 ? 'W' : 'T', nodes[n].val, 0);
         }
-        init_item(buf);
         return;
     }
-    if (is_pointer(t) && address_constant(n, 0, &g, &off)) {
-        sprintf(buf, "A %s %d", ir_sym(g), wrap24(off));
-        init_item(buf);
+    if (is_pointer(t) && address_constant(n, 0, &g, &k)) {
+        rec_put(off, 3, 'A', g, k);
         return;
     }
-    if (local_template && ndeferred < MAX_DEFERRED) {
-        deferred_off[ndeferred] = init_base;
-        deferred_type[ndeferred] = t;
-        deferred_node[ndeferred] = whole;
-        ndeferred++;
+    if (local_template) {
+        rec_put(off, type_size(t), 'D', t, whole);
         keep_nodes = 1;
-        sprintf(buf, "Z %d", type_size(t));
-        init_item(buf);
         return;
     }
     error("initialiser is not a constant");
-}
-
-/* n zero bytes, if n > 0. */
-static void zero_fill(int n)
-{
-    char buf[24];
-
-    if (n > 0) {
-        sprintf(buf, "Z %d", n);
-        init_item(buf);
-    }
 }
 
 /* An array a narrow string can initialise: of a 1-byte integer type. */
@@ -882,18 +1203,20 @@ static int is_wchar_array(int t)
     return types[t].kind == TY_ARRAY && type_size(types[t].base) == 3 && is_integer(types[t].base);
 }
 
-/* A wide string literal for a wchar_t array; returns the bytes written.
- *
- * As init_string, in 3-byte T items (tok_str holds a wide string's
- * characters 3 bytes each). */
-static int init_wstring(int t)
+/* A string literal for a char or (wide) wchar_t array at off; returns the
+ * array's size in bytes. An array of unknown size takes the string's
+ * length plus the terminator; one exactly the string's length gets no
+ * terminator (C89 3.5.7 allows it); a longer one is zero-filled. A wide
+ * string's characters are T records, 3 bytes each as tok_str holds them. */
+static int init_string(int t, int off)
 {
-    char buf[16];
     int n;
     int k;
     int i;
     int count;
+    int w;
 
+    w = tok_wide ? 3 : 1;
     count = types[t].count;
     n = tok_len;
     if (count < 0)
@@ -901,43 +1224,16 @@ static int init_wstring(int t)
     if (n > count)
         error("string initialiser longer than the array");
     k = n < count ? n : count;
-    for (i = 0; i < k; i++) {
-        sprintf(buf, "T %d", wide_char_at(tok_str + 3 * i));
-        init_item(buf);
+    if (tok_wide) {
+        for (i = 0; i < k; i++)
+            rec_put(off + 3 * i, 3, 'T', wide_char_at(tok_str + 3 * i), 0);
+    } else {
+        rec_string(off, tok_str, k);
     }
-    if (k < count) {
-        init_item("T 0");
-        zero_fill(3 * (count - k - 1));
-    }
+    if (k < count)
+        rec_put(off + w * k, w, w == 1 ? 'B' : 'T', 0, 0);       /* the terminator */
     next();
-    return 3 * count;
-}
-
-/* A string literal for a char array; returns the bytes written.
- *
- * An array of unknown size takes the string's length plus the
- * terminator; one exactly the string's length gets no terminator (C89
- * 3.5.7 allows it); a longer one is zero-filled. */
-static int init_string(int t)
-{
-    int n;
-    int k;
-    int count;
-
-    count = types[t].count;
-    n = tok_len;
-    if (count < 0)
-        count = n + 1;
-    if (n > count)
-        error("string initialiser longer than the array");
-    k = n < count ? n : count;
-    string_item(tok_str, k);
-    if (k < count) {
-        init_item("B 0");
-        zero_fill(count - k - 1);
-    }
-    next();
-    return count;
+    return w * count;
 }
 
 /* After too many initialisers, skip to the '}' of the current braces. */
@@ -956,60 +1252,36 @@ static void skip_to_brace(void)
     }
 }
 
-static int init_any(int t);
-
-/* Bit-field initialisers are packed into bytes (a run of bit-fields shares
- * them) and written when the run ends. */
-static int bf_start;            /* the pending bytes' offset in the struct */
-static int bf_len;
-static int bf_bytes[4];
-
-/* Writes the pending bit-field bytes as B items; returns their count. */
-static int bf_flush(void)
+/* Past the rest of one initialiser (after an error), to the ',' or '}'
+ * that follows it at this level. */
+static void skip_initialiser(void)
 {
-    char buf[16];
-    int i;
+    int depth;
 
-    for (i = 0; i < bf_len; i++) {
-        sprintf(buf, "B %d", ((bf_bytes[i] & 255) ^ 128) - 128);
-        init_item(buf);
+    depth = 0;
+    while (tok != TK_EOF && (depth > 0 || (tok != TK_P + ',' && tok != TK_P + '}'))) {
+        if (tok == TK_P + '{')
+            depth++;
+        else if (tok == TK_P + '}')
+            depth--;
+        next();
     }
-    i = bf_len;
-    bf_len = 0;
-    return i;
 }
 
-/* Member m's initialiser (an integer constant) into the pending bytes;
- * done is the bytes already written. Returns the bytes written now.
- *
- * A field whose offset lies past the pending bytes ends the run (written
- * out); a new run starts at the field's offset, zero fill before it. The
- * value is masked to the width, shifted to the field's bit and ORed in a
- * byte at a time. */
-static int bf_init(int m, int done)
+static int init_any(int t, int off);
+
+/* Member m's initialiser, a bit-field's (an integer constant), into its
+ * bytes of the struct at base: masked to the width, shifted to the
+ * field's bit and merged into each byte it covers, the other fields' bits
+ * kept. */
+static void bf_init(int m, int base)
 {
     int n;
     int v;
-    int k;
-    int i;
+    int mask;
     int mark;
-    int wrote;
+    int off;
 
-    wrote = 0;
-    if (bf_len > 0 && members[m].offset >= bf_start + bf_len)
-        wrote = bf_flush();
-    if (bf_len == 0) {
-        bf_start = members[m].offset;
-        if (bf_start > done + wrote) {
-            zero_fill(bf_start - done - wrote);
-            wrote = bf_start - done;
-        }
-    }
-    k = members[m].bit + members[m].width;          /* bits from the first byte's bit 0 */
-    while (bf_len < members[m].offset - bf_start + (k + 7) / 8) {
-        bf_bytes[bf_len] = 0;
-        bf_len++;
-    }
     mark = nnodes;
     if (pending_init >= 0) {
         n = pending_init;
@@ -1024,91 +1296,203 @@ static int bf_init(int m, int done)
     if (nodes[n].op != EN_NUM || !is_integer(nodes[n].type)) {
         error("initialiser is not a constant");
         v = 0;
+    } else if (types[members[m].type].kind == TY_BOOL) {
+        v = nodes[n].val != 0;
     } else {
-        v = nodes[n].val & ((1 << members[m].width) - 1);
+        v = nodes[n].val & (members[m].width < 24 ? (1 << members[m].width) - 1 : 0xFFFFFF);
     }
     nnodes = mark;
+    mask = members[m].width < 24 ? (1 << members[m].width) - 1 : 0xFFFFFF;
+    /* the field and its mask a byte at a time from its first; & 0xFFFF
+     * drops the sign bits that >> copies in when the shifted value has
+     * the top bit of a 24-bit int set */
     v = v << members[m].bit;
-    /* & 0xFFFF drops the sign bits that >> copies in when the shifted
-     * value has the top bit of a 24-bit int set */
-    for (i = members[m].offset - bf_start; v != 0; i++) {
-        bf_bytes[i] = bf_bytes[i] | (v & 255);
+    mask = mask << members[m].bit;
+    for (off = base + members[m].offset; mask != 0; off++) {
+        rec_bits(off, mask & 255, v & 255);
         v = (v >> 8) & 0xFFFF;
+        mask = (mask >> 8) & 0xFFFF;
     }
-    return wrote;
 }
 
-/* The elements or members of aggregate t: inside braces (braced) up to the
- * '}', or, with the braces elided, as many as t has (C89 3.5.7). A comma
- * before a '}' is left to the braces' own level. Returns the bytes
- * written, zero fill included. */
-static int init_members(int t, int braced)
+/* Element i (an array's) or member m (a struct's) of aggregate t at off:
+ * its own initialiser. */
+static void init_element(int t, int off, int i, int m)
+{
+    if (types[t].kind == TY_ARRAY)
+        init_any(types[t].base, off + i * type_size(types[t].base));
+    else if (members[m].width > 0)
+        bf_init(m, off);
+    else
+        init_any(members[m].type, off + members[m].offset);
+}
+
+/* Whether tok starts a designator (C99), which only braces may hold. */
+static int at_designator(void)
+{
+    return !strict && (tok == TK_P + '.' || tok == TK_P + '[');
+}
+
+static int init_members(int t, int off, int braced, int start, int cont);
+
+/* A designator at aggregate t, at off: tok is its '[' or '.'. *pos gets the
+ * element or member it names; then either more designators, for that
+ * subobject, which is then initialised on from there as with its braces
+ * elided, or '=' and its initialiser. */
+static void designation(int t, int off, int *pos)
+{
+    int k;
+    int et;
+    int eoff;
+    int m;
+    int sub;
+
+    /* the wrong kind of designator is reported and read past, and the
+     * first element or member stands in for it */
+    m = -1;
+    if (types[t].kind == TY_ARRAY) {
+        k = 0;
+        if (accept(TK_P + '.')) {
+            error("a member designator for an array");
+            if (tok == TK_IDENT)
+                next();
+        } else {
+            next();
+            k = const_expr();
+            expect(TK_P + ']', "']' after an array designator");
+            if (k < 0 || (types[t].count >= 0 && k >= types[t].count)) {
+                error("an array designator beyond the array's bounds");
+                k = 0;
+            }
+        }
+        *pos = k;
+        et = types[t].base;
+        eoff = off + k * type_size(et);
+    } else {
+        if (accept(TK_P + '[')) {
+            error("an array designator for a struct");
+            const_expr();
+            expect(TK_P + ']', "']' after an array designator");
+        } else {
+            next();
+            if (tok != TK_IDENT) {
+                error("a member name after '.'");
+            } else {
+                m = find_member(types[t].base, tok_name);
+                if (m < 0)
+                    error_s("no member named ", name_str(tok_name));
+                next();
+            }
+        }
+        if (m < 0)
+            m = tags[types[t].base].members;
+        *pos = m;
+        et = members[m].type;
+        eoff = off + members[m].offset;
+    }
+    if (tok == TK_P + '.' || tok == TK_P + '[') {
+        if ((types[et].kind != TY_ARRAY && !is_struct(et)) || (m >= 0 && members[m].width > 0)) {
+            error("a designator for a part of something that is not an array or a struct");
+            skip_initialiser();
+            return;
+        }
+        designation(et, eoff, &sub);
+        /* on from the next subobject, but in a union there is none */
+        init_members(et, eoff, 0, types[et].kind == TY_ARRAY ? sub + 1
+                     : tags[types[et].base].is_union ? -1 : members[sub].next, 1);
+        return;
+    }
+    expect(TK_P + '=', "'=' after a designator");
+    if (m >= 0 && members[m].width > 0)
+        bf_init(m, off);
+    else
+        init_any(et, eoff);
+}
+
+/* The elements or members of aggregate t at off, from element or member
+ * start (-1: none): inside braces (braced) up to the '}', or, with the
+ * braces elided, as many as t has. cont: an initialiser came before, so
+ * the first one here follows a comma (going on after a designator). A
+ * comma before a '}', or one that the braces' own level needs (before a
+ * designator, or when t has no room for another element), is left to it
+ * when the braces are elided. A union takes one member, the first unless
+ * designators name others. Returns the number of elements an array's
+ * initialiser reached (its size, when unknown). */
+static int init_members(int t, int off, int braced, int start, int cont)
 {
     int i;
     int m;
-    int done;
+    int k;
     int count;
-    int et;
-    int base;
+    int high;
+    int first;
+    int done;
+    int is_array;
+    int is_union;
 
-    /* i counts the elements; for a struct m walks the member list, and
-     * zero fill pads to each member's offset; init_base moves to each
-     * element's position, for a deferred store */
-    done = 0;
-    i = 0;
-    m = types[t].kind == TY_ARRAY ? -1 : tags[types[t].base].members;
-    count = types[t].kind == TY_ARRAY ? types[t].count : -1;
-    for (;;) {
-        if (types[t].kind == TY_ARRAY ? count >= 0 && i >= count : m < 0)
-            break;
-        if (i > 0 && types[t].kind != TY_ARRAY && tags[types[t].base].is_union)
-            break;                      /* a union: its first member only */
-        if (tok == TK_P + '}')
-            break;
-        if (i > 0) {
-            if (tok != TK_P + ',' || (!braced && peek() == TK_P + '}'))
+    is_array = types[t].kind == TY_ARRAY;
+    is_union = !is_array && tags[types[t].base].is_union;
+    count = is_array ? types[t].count : -1;
+    i = is_array ? start : 0;
+    m = is_array ? -1 : start;
+    high = 0;
+    done = cont;                        /* a union is done after one */
+    for (first = 1;; first = 0) {
+        if (!first || cont) {
+            if (tok != TK_P + ',')
                 break;
-            next();
-            if (tok == TK_P + '}')
+            k = peek();
+            if (k == TK_P + '}') {
+                if (braced)
+                    next();             /* a comma before the '}' */
                 break;
-        }
-        if (types[t].kind != TY_ARRAY && members[m].width > 0) {
-            done = done + bf_init(m, done);
-        } else {
-            if (bf_len > 0)
-                done = done + bf_flush();
-            if (types[t].kind != TY_ARRAY && members[m].offset > done) {
-                zero_fill(members[m].offset - done);
-                done = members[m].offset;
             }
-            et = types[t].kind == TY_ARRAY ? types[t].base : members[m].type;
-            base = init_base;
-            init_base = base + done;
-            done = done + init_any(et);
-            init_base = base;
+            if (!strict && (k == TK_P + '.' || k == TK_P + '[')) {
+                if (!braced)
+                    break;
+            } else if (is_array ? count >= 0 && i >= count : m < 0 || (is_union && done)) {
+                break;                  /* no room: braced, too many (init_any reports it) */
+            }
+            next();
+        } else if (tok == TK_P + '}') {
+            break;
         }
-        i++;
-        if (m >= 0)
-            m = members[m].next;
+        if (at_designator()) {
+            if (!braced)
+                break;
+            if (is_array) {
+                designation(t, off, &i);
+                i++;
+            } else {
+                designation(t, off, &m);
+                m = members[m].next;
+            }
+        } else {
+            if (is_array ? count >= 0 && i >= count : m < 0 || (is_union && done))
+                break;
+            if (!is_array && types[members[m].type].kind == TY_ARRAY && types[members[m].type].count < 0) {
+                error("a flexible array member cannot be initialised");
+                break;
+            }
+            init_element(t, off, i, m);
+            if (is_array)
+                i++;
+            else
+                m = members[m].next;
+        }
+        done = 1;
+        if (is_array && i > high)
+            high = i;
     }
-    if (types[t].kind == TY_ARRAY) {
-        if (count < 0)
-            count = i;
-        zero_fill(count * type_size(types[t].base) - done);
-        return count * type_size(types[t].base);
-    }
-    if (bf_len > 0)
-        done = done + bf_flush();
-    zero_fill(type_size(t) - done);
-    return type_size(t);
+    return high;
 }
 
 /* A struct or union member without braces (C89 3.5.7, C99 6.7.8): an
- * expression of a struct type is the whole member's value (in a local
- * aggregate in the default mode; elsewhere it is not a constant);
- * otherwise it is the first scalar's, pending for init_members. Returns
- * 1 if it was the member's value. */
-static int struct_value_init(int t)
+ * expression of a struct type is the whole member's value (in a template
+ * in the default mode; elsewhere it is not a constant); otherwise it is
+ * the first scalar's, pending for init_members. Returns 1 if it was the
+ * member's value. */
+static int struct_value_init(int t, int off)
 {
     int n;
     int mark;
@@ -1120,16 +1504,16 @@ static int struct_value_init(int t)
         return 0;
     n = pending_init;
     pending_init = -1;
-    static_item(n, t);
+    static_item(n, t, off);
     if (!keep_nodes)
         nnodes = mark;
     keep_nodes = 0;
     return 1;
 }
 
-/* An object of type t's initialiser, written as data items; returns the
- * bytes written (for an array of unknown size, what the initialiser gave). */
-static int init_any(int t)
+/* An object of type t's initialiser at off, as records; returns its size
+ * (for an array of unknown size, what the initialiser gave it). */
+static int init_any(int t, int off)
 {
     int n;
     int mark;
@@ -1137,39 +1521,42 @@ static int init_any(int t)
     /* An aggregate: a string for a char or wchar_t array (braced or not);
      * a struct given a whole struct value; braces elided; then braced. A
      * scalar may be braced too ("int x = { 1 };"). */
-
     if (types[t].kind == TY_ARRAY || is_struct(t)) {
         if (pending_init < 0 && tok == TK_STR && (is_char_array(t) || is_wchar_array(t))) {
             if (tok_wide != is_wchar_array(t))
                 error(tok_wide ? "a wide string for a char array" : "a narrow string for a wchar_t array");
-            return tok_wide ? init_wstring(t) : init_string(t);
+            return init_string(t, off);
         }
-        if (is_struct(t) && tok != TK_STR && (pending_init >= 0 || tok != TK_P + '{') && struct_value_init(t))
+        if (is_struct(t) && tok != TK_STR && (pending_init >= 0 || tok != TK_P + '{') && struct_value_init(t, off))
             return type_size(t);
-        if (pending_init >= 0 || !accept(TK_P + '{'))
-            return init_members(t, 0);          /* braces elided */
-        if (tok == TK_STR && (is_char_array(t) || is_wchar_array(t))) {
-            if (tok_wide != is_wchar_array(t))
-                error(tok_wide ? "a wide string for a char array" : "a narrow string for a wchar_t array");
-            n = tok_wide ? init_wstring(t) : init_string(t);
+        if (pending_init >= 0 || !accept(TK_P + '{')) {
+            n = init_members(t, off, 0, types[t].kind == TY_ARRAY ? 0 : tags[types[t].base].members, 0);
         } else {
-            n = init_members(t, 1);
+            if (tok == TK_STR && (is_char_array(t) || is_wchar_array(t))) {
+                if (tok_wide != is_wchar_array(t))
+                    error(tok_wide ? "a wide string for a char array" : "a narrow string for a wchar_t array");
+                n = init_string(t, off) / type_size(types[t].base);
+            } else {
+                n = init_members(t, off, 1, types[t].kind == TY_ARRAY ? 0 : tags[types[t].base].members, 0);
+            }
+            accept(TK_P + ',');
+            if (tok != TK_P + '}')
+                skip_to_brace();
+            expect(TK_P + '}', "'}'");
         }
-        accept(TK_P + ',');
-        if (tok != TK_P + '}')
-            skip_to_brace();
-        expect(TK_P + '}', "'}'");
-        return n;
+        if (types[t].kind == TY_ARRAY)
+            return (types[t].count >= 0 ? types[t].count : n) * type_size(types[t].base);
+        return type_size(t);
     }
     mark = nnodes;
     if (pending_init >= 0) {
         n = pending_init;
         pending_init = -1;
-        static_item(n, t);
+        static_item(n, t, off);
     } else if (accept(TK_P + '{')) {
         if (tok == TK_STR && is_integer(t))
             error("a string cannot initialise one char");
-        static_item(assign_expr(), t);
+        static_item(assign_expr(), t, off);
         accept(TK_P + ',');
         if (tok != TK_P + '}')
             skip_to_brace();
@@ -1177,7 +1564,7 @@ static int init_any(int t)
     } else {
         if (tok == TK_STR && is_integer(t))
             error("a string cannot initialise one char");
-        static_item(assign_expr(), t);
+        static_item(assign_expr(), t, off);
     }
     if (!keep_nodes)
         nnodes = mark;
@@ -1185,16 +1572,111 @@ static int init_any(int t)
     return type_size(t);
 }
 
-/* The initialiser of an object of type *t, whose unknown array size it
- * completes. Items are written at once; a string object needed on the way
- * becomes an SO item (in_static_init). */
+/* The initialiser of an object of type *t, whose D is open, as its data
+ * items; completes an array of unknown size. The object is the bottom
+ * frame, which may write early when the table fills. */
 static void static_init(int *t)
 {
     int n;
 
-    n = init_any(*t);
+    nrecs = 0;
+    pool_used = 0;
+    frame_base = 0;
+    frame_open = 1;
+    rec_flushed = 0;
+    n = init_any(*t, 0);
     if (types[*t].kind == TY_ARRAY && types[*t].count < 0 && type_size(types[*t].base) > 0)
         *t = array_of(types[*t].base, n / type_size(types[*t].base));
+    rec_zeros(type_size(*t) - rec_write(0, nrecs, rec_flushed));
+}
+
+/* *(et *)((unsigned char *)&lv + off) = expression n: a template's
+ * deferred element, stored after the copy into lv. */
+static int deferred_store(int lv, int off, int et, int n)
+{
+    int p;
+
+    p = node(EN_ADDR, ptr_to(nodes[lv].type), lv, -1, 0);
+    p = node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0);
+    if (off != 0)
+        p = node(EN_BIN, ptr_to(T_UCHAR), p, num(off, T_INT), B_ADD);
+    p = node(EN_DEREF, et, node(EN_CAST, ptr_to(et), p, -1, 0), -1, 0);
+    return node(EN_ASSIGN, et, p, n, 0);
+}
+
+/* C99's compound literal, (t){ ... }, at its '{': an unnamed object of
+ * type t (an array of unknown size completed by the initialiser), as an
+ * lvalue. Its value is a static object of its own, __ini<id>_<n>, whose D
+ * is written when the literal is complete, or, if an object's D is open,
+ * after that object's E. At file scope that object is the literal. In a
+ * function, the literal is a temporary local that each evaluation fills:
+ * the object is its template, copied in, and the elements that are not
+ * constants are stored after the copy, as for a local aggregate; the
+ * expression is *(copy, the stores, &temporary). */
+int compound_literal(int t)
+{
+    char buf[60];
+    int g;
+    int n;
+    int i;
+    int tmp;
+    int lv;
+    int e;
+    int save_base;
+    int save_open;
+    int save_pool;
+    int save_template;
+    int save_keeping;
+    int save_pending;
+
+    if (types[t].kind == TY_FUNC || is_void(t) || (type_size(t) == 0 && types[t].kind != TY_ARRAY)) {
+        error("a compound literal of a function, void or an incomplete type");
+        t = T_INT;
+    }
+    save_base = frame_base;
+    save_open = frame_open;
+    save_pool = pool_used;
+    save_template = local_template;
+    save_keeping = keeping;
+    save_pending = pending_init;
+    frame_base = nrecs;
+    frame_open = 0;
+    local_template = in_function && !strict;
+    pending_init = -1;
+    n = init_any(t, 0);
+    if (types[t].kind == TY_ARRAY && types[t].count < 0) {
+        t = array_of(types[t].base, n / type_size(types[t].base));
+        if (type_size(t) == 0)
+            error("a compound literal of an empty array");
+    }
+    t = unqual(t);
+    g = init_template(t);
+    keeping = in_static_init;
+    sprintf(buf, "D %s s", ir_sym(g));
+    rec_line(buf);
+    rec_zeros(type_size(t) - rec_write(frame_base, nrecs, 0));
+    rec_line("E");
+    keeping = save_keeping;
+    e = -1;
+    if (in_function) {
+        tmp = new_temp(t);
+        lv = node(EN_LVAR, t, -1, -1, tmp);
+        e = node(EN_ASSIGN, t, lv, node(EN_GVAR, t, -1, -1, g), 0);
+        for (i = frame_base; i < nrecs; i++)
+            if (recs[i].kind == 'D')
+                e = node(EN_COMMA, recs[i].a, e, deferred_store(lv, recs[i].off, recs[i].a, recs[i].b), 0);
+        e = node(EN_COMMA, ptr_to(t), e, node(EN_ADDR, ptr_to(t), lv, -1, 0), 0);
+        e = node(EN_DEREF, t, e, -1, 0);
+    }
+    nrecs = frame_base;
+    pool_used = save_pool;
+    frame_base = save_base;
+    frame_open = save_open;
+    local_template = save_template;
+    pending_init = save_pending;
+    if (e >= 0)
+        return e;
+    return node(EN_GVAR, t, -1, -1, g);
 }
 
 /* ---- file-scope declarations ------------------------------------------------------- */
@@ -1276,6 +1758,20 @@ static int declare_global(int name, int t, int sc)
     return g;
 }
 
+/* The linkage of a function declared inline without static or extern
+ * (C99 6.7.4): an inline definition, which this unit keeps to itself, as
+ * static, so that a header's inline function can be in several units; but
+ * an external definition if the unit has already declared the function
+ * without inline (agonc never inlines, so the function's code is made
+ * either way, and ld leaves out a copy nobody calls). */
+static int inline_linkage(int name)
+{
+    int g;
+
+    g = find_global(name);
+    return g >= 0 && globals[g].kind == SK_FUNC && globals[g].sclass != SC_STATIC ? SC_NONE : SC_STATIC;
+}
+
 /* An identical repeated typedef is accepted (as headers may do); any
  * other redeclaration is an error. */
 static void declare_typedef(int name, int t)
@@ -1315,7 +1811,8 @@ static void define_var(int g)
         static_init(&t);
         in_static_init = 0;
         write_ir("E");
-        wide_flush();                   /* its wide strings, after it */
+        wide_flush();                   /* its wide strings and compound literals, after it */
+        rec_kept_flush();
         globals[g].type = t;
     } else {
         if (type_size(t) == 0)
@@ -1342,7 +1839,6 @@ static void label_here(int label)
     emit_fmt("L %d", label);
 }
 
-static void store_deferred(int l, int i);
 
 /* ---- a switch on a long long (C99) ----
  * The IR's switch tables are 32-bit, so a switch on a long long keeps its
@@ -1504,13 +2000,12 @@ static void local_decl(void)
                     mark = nnodes;
                     in_static_init = 1;
                     local_template = !strict;
-                    init_base = 0;
-                    ndeferred = 0;
                     static_init(&t);
                     local_template = 0;
                     in_static_init = 0;
                     write_ir("E");
                     wide_flush();
+                    rec_kept_flush();
                     globals[g].type = t;
                     locals[l].type = t;
                     if (type_size(t) == 0)
@@ -1520,8 +2015,14 @@ static void local_decl(void)
                     emit_fmt_s("A %s", ir_sym(g));
                     emit_fmt("COPY %d", type_size(t));
                     emit_line("DROP");
-                    for (i = 0; i < ndeferred; i++)
-                        store_deferred(l, i);
+                    /* the elements that are not constants, after the copy */
+                    for (i = 0; i < nrecs; i++) {
+                        if (recs[i].kind == 'D') {
+                            emit_rvalue(deferred_store(node(EN_LVAR, t, -1, -1, l), recs[i].off, recs[i].a,
+                                                       recs[i].b));
+                            emit_line("DROP");
+                        }
+                    }
                     nnodes = mark;
                 } else {
                     mark = nnodes;
@@ -1542,24 +2043,6 @@ static void local_decl(void)
             break;
     }
     expect(TK_P + ';', "';' after a declaration");
-}
-
-/* Local l's deferred element i: stored at its place in the object.
- *
- * As *(et *)((unsigned char *)&l + offset) = expression. */
-static void store_deferred(int l, int i)
-{
-    int p;
-    int et;
-
-    et = deferred_type[i];
-    p = node(EN_ADDR, ptr_to(locals[l].type), node(EN_LVAR, locals[l].type, -1, -1, l), -1, 0);
-    p = node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0);
-    if (deferred_off[i] != 0)
-        p = node(EN_BIN, ptr_to(T_UCHAR), p, num(deferred_off[i], T_INT), B_ADD);
-    p = node(EN_DEREF, et, node(EN_CAST, ptr_to(et), p, -1, 0), -1, 0);
-    emit_rvalue(node(EN_ASSIGN, et, p, deferred_node[i], 0));
-    emit_line("DROP");
 }
 
 /* "(" expression ")" for if, while, do and switch: a scalar. */
@@ -1706,6 +2189,7 @@ static void statement(void)
     int ob;
     int ohb;
     int t;
+    int scoped;
     struct i32 cv;
 
     mark = nnodes;
@@ -1776,13 +2260,21 @@ static void statement(void)
     case KW_FOR:
         next();
         expect(TK_P + '(', "'(' after for");
-        if (tok != TK_P + ';') {
-            n = expression();
-            emit_rvalue(n);
-            emit_line("DROP");
-            nnodes = mark;
+        /* C99's for (int i = 0; ...): the declaration has a scope of its
+         * own, around the whole statement, body included */
+        scoped = !strict && is_type_start();
+        if (scoped) {
+            scope_enter();
+            local_decl();               /* its ';' too */
+        } else {
+            if (tok != TK_P + ';') {
+                n = expression();
+                emit_rvalue(n);
+                emit_line("DROP");
+                nnodes = mark;
+            }
+            expect(TK_P + ';', "';' in for");
         }
-        expect(TK_P + ';', "';' in for");
         l1 = new_label();
         l2 = new_label();
         l3 = new_label();
@@ -1811,6 +2303,8 @@ static void statement(void)
         jump(l1);
         label_here(l3);
         reachable = !r1 || n;
+        if (scoped)
+            scope_leave();
         return;
     case KW_BREAK:
         next();
@@ -1978,7 +2472,7 @@ static void compound(int scope)
     decls_ok = 1;
     while (tok != TK_P + '}' && tok != TK_EOF) {
         if (is_type_start()) {
-            if (!decls_ok)
+            if (!decls_ok && strict)    /* C99 allows it; C89 wants a diagnostic */
                 warning("declaration after a statement (a C99 feature)");
             local_decl();
         } else {
@@ -2109,6 +2603,7 @@ static void function_def(int g)
             add_local(pnames[i], plist[types[t].params + i], 1);
     }
     cur_func = g;
+    cur_func_name = name_str(globals[g].name);  /* for __func__ (expr.c) */
     cur_ret = unqual(types[t].base);
     func_variadic = types[t].variadic;
     labels = 0;
@@ -2182,6 +2677,7 @@ static void external_decl(void)
     int g;
     int first;
     int kr;
+    int inl;
 
     if (tok == TK_ASMB || tok == KW_ASM) {
         /* c89_spec.md 13 item 1: a function or data written in assembly
@@ -2195,6 +2691,7 @@ static void external_decl(void)
         return;
     }
     base = decl_specs(&sc);
+    inl = decl_inline;                  /* a parameter list's decl_specs resets it */
     if (accept(TK_P + ';')) {
         if (!declared_tag)
             warning("a declaration that declares nothing");
@@ -2208,6 +2705,8 @@ static void external_decl(void)
         } else if (sc == SC_TYPEDEF) {
             declare_typedef(name, t);
         } else if (types[t].kind == TY_FUNC) {
+            if (inl && sc == SC_NONE)
+                sc = inline_linkage(name);
             kr = kr_list && npnames > 0;
             if (first && (tok == TK_P + '{' || (kr && is_type_start()))) {
                 if (kr)
@@ -2333,7 +2832,7 @@ int main(int argc, char **argv)
         }
     }
     if (in_path == NULL || out_path == NULL) {
-        fprintf(stderr, "usage: cc1 in.i out.ir [-u unitname] [-w] [-Werror] [-v]\n");
+        fprintf(stderr, "usage: cc1 in.i out.ir [-u unitname] [-ansi] [-w] [-Werror] [-v]\n");
         return 200;
     }
     if (uname == NULL) {
@@ -2359,6 +2858,7 @@ int main(int argc, char **argv)
     ir_out = fopen(out_path, "wb");
     if (ir_out == NULL) {
         fprintf(stderr, "cc1: cannot create %s\n", out_path);
+        lex_close();                    /* MOS would not close the input */
         return 200;
     }
     write_ir("IR 2");

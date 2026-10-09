@@ -4,7 +4,7 @@ Three headers give a C program the rest of the machine: `<agon/mos.h>` for
 MOS (files, the clock, the keyboard, the system variables, the FatFS calls,
 keyboard and interrupt handlers), `<agon/uart.h>` for the second serial
 port, and `<agon/vdp.h>` for the VDP, which owns the screen, sound,
-keyboard and mouse. None of them is part of C89, and all of them work in
+keyboard and mouse. None of them is part of standard C, and all of them work in
 both language modes. This chapter is a reference: one table per area, with
 prose only where something needs explaining. What the VDP or MOS does with
 a command is left to the Agon documentation, linked from each section; the
@@ -24,12 +24,12 @@ order and ranges: [`mos.h`](../../lib/agon/mos.h),
 #include <agon/vdp.h>      /* VDU commands */
 ```
 
-The headers live in `/lib/agon`. Nothing needs to be named on the command
+The headers live in `/lib/agonc/agon`. Nothing needs to be named on the command
 line to use them. The few MOS calls the C library itself relies on (opening,
 reading, writing, seeking, testing and closing files by handle, deleting,
 renaming, making directories, a file's size, loading, waiting for a key, the
 clock, `mos_oscli` and the system variables' address) are in `libc.s`, which every program links. The
-rest of the interface is in `/lib/libagon.s`, which the driver always passes
+rest of the interface is in `/lib/agonc/libagon.s`, which the driver always passes
 to `ld` last, marked "read only if needed": `ld` opens it, through its
 index, only when the program still has an undefined function after
 everything else, and then keeps only the functions the program reaches. A
@@ -528,11 +528,11 @@ waits, and so do all other interrupts. So a handler should be short: note
 what happened in a `volatile` variable and return, and let the main
 program do the work. It must not call any MOS, stdio or VDU function
 (they are not reentrant, and the main program may be in the middle of
-one). Arithmetic of every kind is safe: the entry code saves the
-registers, and also the fixed memory cells in which the runtime's
-multiply, divide and shift helpers keep their working values, so a handler
-that divides does not disturb a division the main program was in the
-middle of.
+one). Arithmetic of every kind is safe: the multiply and divide helpers
+keep nothing in memory, and the entry code saves the registers, the
+alternate registers and the fixed memory cells in which the runtime's
+shift helpers keep their working values, so a handler that divides or
+shifts does not disturb one the main program was in the middle of.
 
 The library's Ctrl-C check stays in place under a key handler (it runs
 first), and the key handler is removed when the program ends, however it

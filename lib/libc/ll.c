@@ -1,6 +1,7 @@
 /* ll.c - the helpers compiled code calls for long long (abi.md 6), and
- * the library's long long functions (strtoll ... lldiv, and the printf
- * and scanf family's ll conversions).
+ * the library's long long functions (strtoll ... lldiv, <inttypes.h>'s
+ * imaxabs ... strtoumax, and the printf and scanf family's ll
+ * conversions).
  *
  * The arithmetic is int64.c's, the same code cc1 folds constants with. A
  * long long is handled as a double is: by the address of its 8 bytes,
@@ -19,7 +20,8 @@
  *
  * Sections: the operators (with the shared divide, binary and shift
  * that the compound assignments reuse); the digit loops behind printf's
- * and scanf's ll conversions; and <stdlib.h>'s strtoll family.
+ * and scanf's ll conversions; and <stdlib.h>'s strtoll family, then
+ * <inttypes.h>'s functions.
  */
 
 /* int64's functions under reserved names: a program may use the plain ones.
@@ -70,18 +72,14 @@
 /* ---- the operators ------------------------------------------------------------ */
 
 /* a / b and a % b; by zero, which C leaves undefined, a quotient of 0 and
- * a remainder of a (and no fault). int64's divisions need b != 0; the
- * signed one truncates toward zero, as C89's / does. */
+ * a remainder of a (and no fault): int64's divisions give exactly that.
+ * The signed one truncates toward zero, as C89's / does. */
 static void divide(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b, int is_signed)
 {
-    if (i64_is_zero(b)) {
-        i64_set(q, 0, 0);
-        *rem = *a;
-    } else if (is_signed) {
+    if (is_signed)
         i64_divs(q, rem, a, b);
-    } else {
+    else
         i64_divu(q, rem, a, b);
-    }
 }
 
 /* r = a op b for the operators with a long long b: the division helpers
@@ -145,24 +143,39 @@ struct i64 *__qmul(struct i64 *r, const struct i64 *b, const struct i64 *a)
     return r;
 }
 
+/* The divisions call int64's directly (binary's way, through divide, is
+ * for __qasg): r may be a or b, which int64's divisions allow, as they
+ * read both operands before they write. The other result goes to a local. */
 struct i64 *__qdivs(struct i64 *r, const struct i64 *b, const struct i64 *a)
 {
-    return binary(OP_DIVS, r, b, a);
+    struct i64 rem;
+
+    i64_divs(r, &rem, a, b);
+    return r;
 }
 
 struct i64 *__qdivu(struct i64 *r, const struct i64 *b, const struct i64 *a)
 {
-    return binary(OP_DIVU, r, b, a);
+    struct i64 rem;
+
+    i64_divu(r, &rem, a, b);
+    return r;
 }
 
 struct i64 *__qrems(struct i64 *r, const struct i64 *b, const struct i64 *a)
 {
-    return binary(OP_REMS, r, b, a);
+    struct i64 q;
+
+    i64_divs(&q, r, a, b);
+    return r;
 }
 
 struct i64 *__qremu(struct i64 *r, const struct i64 *b, const struct i64 *a)
 {
-    return binary(OP_REMU, r, b, a);
+    struct i64 q;
+
+    i64_divu(&q, r, a, b);
+    return r;
 }
 
 struct i64 *__qand(struct i64 *r, const struct i64 *b, const struct i64 *a)
@@ -460,4 +473,28 @@ lldiv_t lldiv(long long numer, long long denom)
     r.quot = numer / denom;
     r.rem = numer % denom;
     return r;
+}
+
+/* <inttypes.h>'s, C99's, written in the types underneath, without the
+ * header, whose hundreds of macros would set the preprocessor's peak:
+ * intmax_t is long long, and imaxdiv_t has lldiv_t's two long long
+ * members */
+long long imaxabs(long long j)
+{
+    return llabs(j);
+}
+
+lldiv_t imaxdiv(long long numer, long long denom)
+{
+    return lldiv(numer, denom);
+}
+
+long long strtoimax(const char *s, char **endptr, int base)
+{
+    return strtoll(s, endptr, base);
+}
+
+unsigned long long strtoumax(const char *s, char **endptr, int base)
+{
+    return strtoull(s, endptr, base);
 }

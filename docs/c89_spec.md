@@ -17,7 +17,7 @@ frames, symbols, memory layout — authoritative where the two overlap),
 
 agonc has two modes.
 
-| | Default | Strict (`-ansi`, `-std=c89`, `-std=c90`) |
+| | Default (`-std=c99`, `-std=gnu99`) | Strict (`-ansi`, `-std=c89`, `-std=c90`) |
 |---|---|---|
 | `asm` | a keyword (§13) | an ordinary identifier; `__asm` still works |
 | `//` comments | accepted | not comments (`a //* c */ b` is `a / b`, as C89 requires) |
@@ -26,6 +26,8 @@ agonc has two modes.
 | implicit function declarations (calling an undeclared function) | **errors**, as in current GCC and Clang | accepted, as C89 requires, with a warning at each |
 | a comma after the last enumerator, non-constant initialisers for local aggregates (a struct value for a member among them), `#warning` (C99 and later) | accepted | errors, as C89 requires |
 | `long long` and `unsigned long long`, the `LL` and `ULL` suffixes (C99) | accepted (§13) | errors, as C89 requires |
+| a declaration in `for`, `_Bool`, `inline`, `restrict`, flexible array members, hexadecimal floating constants, variadic macros and `_Pragma` (C99) | accepted (§13) | errors, as C89 requires (`_Bool`, `inline` and `restrict` are ordinary identifiers) |
+| `strtod`, `atof` and the `scanf` family | read C99's hexadecimal, `inf` and `nan` forms too (§15) | read C89's forms only, as C89 requires |
 | integer constants and `#if` arithmetic | typed and done as C99 does, in 64 bits at most (§6, §11) | as C89 requires, in 32 bits at most |
 | every other extension (§13) | on | on: none of them changes the meaning of a conforming program |
 
@@ -38,8 +40,9 @@ declaration, silently gives a wrong result. In strict mode, where they are
 accepted, the linker still reports that case (§13). Implicit `int` in a
 declaration hides nothing of the kind, and old code is full of it, so both
 modes accept it with a warning (`-Werror` makes it an error). A declaration
-after a statement in a block, a C99-ism, is accepted with a warning in both
-modes (C89 requires only a diagnostic).
+after a statement in a block, a C99-ism, is accepted in the default mode,
+as C99 has it, and with a warning in strict mode (C89 requires only a
+diagnostic).
 
 ## 2. Translation (G.3.1)
 
@@ -154,8 +157,14 @@ modes (C89 requires only a diagnostic).
   correctly rounded, one algorithm shared by the compiler and the library.
   `<math.h>` functions are accurate to about one unit in the last place
   (fdlibm's algorithms: below one for most, below two for `sinh`, `cosh`
-  and `tanh`; `sqrt`, `fabs`, `floor`, `ceil`, `fmod`, `modf`, `frexp` and
-  `ldexp` are exact).
+  and `tanh`; `sqrt`, `fabs`, `floor`, `ceil`, `fmod`, `modf` and `frexp`
+  are exact, and so is `ldexp` unless its result is subnormal, when it is
+  correctly rounded). Of C99's, most are below one unit too, `acosh`,
+  `atanh`, `erfc` and `lgamma` below two and `tgamma` below five (`lgamma`
+  near a zero of a negative argument loses more); the rounding functions,
+  `fma`, `remainder`, `remquo`, `fdim`, `fmax`, `fmin`, `nextafter`,
+  `copysign`, `logb` and `ilogb` are exact. A `float` form is nearly
+  always the correctly rounded `float`.
   Everything is deterministic, so every result can be checked bit for bit
   against a PC's IEEE arithmetic.
 
@@ -178,12 +187,15 @@ modes (C89 requires only a diagnostic).
 - A **union** member read after a different member was stored gives the
   bytes of the stored value reinterpreted as the read member's type (all
   members start at offset 0).
-- **Bit-fields** (ABI §2): declared `int`, `signed int` or `unsigned int`;
-  a plain `int` bit-field is **signed**. The storage unit is the byte:
+- **Bit-fields** (ABI §2): declared `int`, `signed int` or `unsigned int`
+  (and in the default mode `_Bool`, of 1 bit at most, which stores 0 or 1
+  as a conversion to `_Bool` does); a plain `int` bit-field is **signed**. The storage unit is the byte:
   fields are allocated from the least significant bit; one of 8 bits or
   fewer never crosses a byte boundary; a wider one (up to 24 bits) starts at
   a byte boundary; a zero-width one moves to the next byte.
 - An **enumeration** type is `int`; its constants are `int`.
+- A **flexible array member** (default mode) is at the offset the members
+  before it end at, which is the structure's size: it adds nothing.
 
 ## 9. Qualifiers and declarators (G.3.10, G.3.11)
 
@@ -208,7 +220,7 @@ modes (C89 requires only a diagnostic).
   C99 requires.
 - **Include files**: `#include "name"` looks first in the including file's
   folder, then as `#include <name>` does: each `-I` folder in order, then
-  `/usrlib`, then `/lib` (driver.md). Names are matched without regard to
+  `/usrlib`, then `/lib/agonc` (driver.md). Names are matched without regard to
   case (FAT is case-insensitive). A name may contain folders separated by
   `/`.
 - `#pragma weak name` makes `name` a weak reference (§13). Every other
@@ -249,6 +261,7 @@ the compiler.
 | members of a structure or union | 127 | 127 (and 800 in all structures together) |
 | enumeration constants in an enumeration | 127 | 127 |
 | nesting of structure or union definitions | 15 | ≥ 15 |
+| items of an initialiser held at once (C99: for a designator going back, a compound literal, or a local aggregate with values that are not constants) | — | 512, with 4,096 bytes of strings |
 
 A number is the size of a pass's table; ≥ marks a limit that depends on
 other tables or on memory, and is at least C89's.
@@ -278,8 +291,9 @@ mode (§1).
 6. **`#pragma weak name`**: references to `name` from this translation unit
    are weak (object_format.md §8): they do not bring `name` into the
    program, and if nothing else does, `name` is 0.
-7. **Declarations after statements** in a block, with a warning (both
-   modes; C89 requires only a diagnostic).
+7. **Declarations after statements** in a block: in the default mode as
+   C99 has them, and in strict mode with a warning (C89 requires only a
+   diagnostic).
 8. **`%F`** in `printf` and `scanf` means `%f`, except that infinity and NaN
    print in capitals (Hi-Tech C used `%F`; this is C99's meaning of it).
 9. **Predefined macros** `__AGONC__`, `__EZ80__`, `__ADL__`, and gcc's
@@ -302,7 +316,9 @@ mode (§1).
     and `unsigned` forms; the type sets the field's signedness and maximum
     width, which is never above 24 bits, as for every bit-field (§8; C89
     defines only `int` bit-fields and requires no diagnostic for others).
-11. **`<stdint.h>`** (§15).
+11. **C99's headers** `<stdint.h>`, `<stdbool.h>`, `<inttypes.h>` and
+    `<iso646.h>` (§15), in both modes; strict mode leaves out what needs
+    `long long`, and its `bool` is `int`.
 12. **Agon headers** in `<agon/...>` (§15), outside the standard's names.
 13. **A link-time check of implicit calls**: when a function called
     through an implicit declaration (strict mode) turns out to return
@@ -336,6 +352,45 @@ mode (§1).
     long`; `lldiv_t`, `llabs`, `lldiv`, `atoll`, `strtoll` and `strtoull`
     in `<stdlib.h>`; and the `ll` and `j` length modifiers in the `printf`
     and `scanf` families.
+16. **C99's language**, in the default mode, except variable-length
+    arrays and complex types: declarations mixed with statements (item 7)
+    and in the first
+    clause of a `for`, whose scope ends with the loop; `_Bool`, an unsigned
+    type of 1 byte to which any scalar converts as the result of comparing
+    it with 0; `inline`, which agonc never acts on, with this linkage: a
+    function defined `inline` is external if it is declared `extern` or
+    was declared earlier in the file without `inline`, and otherwise
+    internal, so that where C99 gives an inline definition, with the
+    external definition elsewhere, agonc gives the file a copy of its own
+    (the program behaves the same unless it compares the function's
+    addresses from two files); `restrict`, accepted and ignored; flexible
+    array members (§8); hexadecimal floating constants, correctly rounded;
+    variadic macros (`...` and `__VA_ARGS__`); and `_Pragma("text")`,
+    which, like `#pragma` (§11), is ignored with a warning; designated
+    initialisers, in any order, a later one replacing an earlier one of
+    the same subobject (a union's other bytes are then zero), an array of
+    unknown size taking the highest index; and compound literals, which in
+    a function are automatic objects living to the function's end (a
+    template copied in each time the literal is evaluated, the elements
+    that are not constants stored after it), and at file scope static
+    ones. `__func__` works in both modes, its name being the
+    implementation's in C89. `__STDC_VERSION__` is `199901L` in the
+    default mode, with C11's `__STDC_NO_VLA__` and `__STDC_NO_COMPLEX__`
+    1 to say what is absent, and `__STDC_HOSTED__` 1; strict mode defines
+    none of them.
+17. **C99's library additions**, in the default mode: `snprintf`,
+    `vsnprintf`, `vscanf`, `vfscanf`, `vsscanf`, `strtof`, `strtold`,
+    `_Exit`, `isblank`, `va_copy`, `<inttypes.h>`'s `imaxabs`, `imaxdiv`,
+    `strtoimax` and `strtoumax`; `strtod`, `atof` and the `scanf` family
+    reading hexadecimal, `inf`, `infinity` and `nan` (through other entry
+    points, `__strtod99` and the like, which the headers name: the plain
+    names keep C89's meaning, which strict mode needs); and in both modes
+    the `hh`, `z` and `t` length modifiers and `%a`, which C89 leaves
+    undefined; and C99's `<math.h>` (7.12): every function and macro,
+    the functions in their `float` and `long double` forms too (math99.c,
+    mathf.c), with errors reported by `errno` alone (`math_errhandling` is
+    `MATH_ERRNO`) and rounding always to nearest. Not provided:
+    `<complex.h>`, `<fenv.h>`, `<tgmath.h>`, `<wchar.h>` and `<wctype.h>`.
 
 ## 14. Conformance
 
@@ -357,8 +412,9 @@ deviation from C89 is listed in this section; there are none known.
 Every usable C89 test passes in strict mode:
 c-testsuite 137 of 137, GCC 577 of 577, SDCC 644 of 644 files. In the
 default mode what fails needs a feature agonc does not provide (GCC's
-extended `asm`, compound literals, statement expressions, variable-length
-arrays, calls to undeclared functions) or makes a host's assumption.
+extended `asm`, statement expressions, variable-length arrays, calls to
+undeclared functions) or makes a host's assumption. (The default-mode
+figures predate C99 phases 1 and 2, which may let more tests pass.)
 
 ## 15. The library (G.3.14)
 
@@ -370,7 +426,7 @@ exact-width types for the widths that exist (`int8_t`, `int16_t`,
 `int24_t`, `int32_t`, in the default mode `int64_t`, and unsigned forms),
 the least and fast types, `intptr_t` (`int`), `intmax_t` (`long long` in
 the default mode, `long` in strict mode), and their limits and constant
-macros. A function the program does not call is not in
+macros; and C99's `<stdbool.h>`, `<inttypes.h>` and `<iso646.h>` (§13). A function the program does not call is not in
 its image (ABI §6, object_format.md), so a program pays only for what it
 uses, floating-point formatting in `printf` included.
 
@@ -433,9 +489,12 @@ program towards the stack and never within 256 bytes of it (ABI §8).
   ordinary member (`%[-a]`, `%[a-]`, and `%[z-a]`, the three characters).
 - `printf` prints an infinity as `inf` and a NaN as `nan`, after a `-` if
   the sign bit is set (`INF` and `NAN` for `%E %F %G`); the `0` flag pads
-  them with spaces. `strtod`, `atof` and `scanf` read C89's forms only (no
-  `inf`, `nan` or hexadecimal). `strtod` sets `errno` to `ERANGE` when the
-  result overflows to `HUGE_VAL` or underflows to zero.
+  them with spaces. `%a` prints the value's bits exactly, `0x1.8p+3` for
+  12 (a precision rounds to nearest even). In strict mode `strtod`, `atof`
+  and `scanf` read C89's forms only (no `inf`, `nan` or hexadecimal), as
+  C89 requires; in the default mode they read C99's too (§13). `strtod`
+  sets `errno` to `ERANGE` when the result overflows to `HUGE_VAL` or
+  underflows to zero.
 - `fgetpos` and `ftell` set `errno` to `EBADF` on failure (a console stream,
   or a closed one). `perror(s)` prints `s: message` and a newline on
   `stderr`, or only the message if `s` is null or empty. `strerror` gives
@@ -447,6 +506,14 @@ and sets `errno` to `EDOM`; a result too large returns `±HUGE_VAL` and sets
 `ERANGE` (a subnormal result does not). `fmod(x, 0)`, and `sin`, `cos` and
 `tan` of an infinity, are domain errors; so is `pow(0, y)` for negative `y`,
 which returns `HUGE_VAL`. A NaN argument gives a NaN without an error.
+C99's functions follow the same rules: a pole (`log2(0)`, `atanh(1)`,
+`lgamma(0)`, `tgamma(0)`) gives an infinity with `ERANGE`; `tgamma` of a
+negative integer, `ilogb` of zero, an infinity or a NaN (which return
+`FP_ILOGB0`, `INT_MAX` and `FP_ILOGBNAN`), and `fma` of an infinity times
+zero are domain errors. A `float` form also sets `ERANGE` when only the
+`float` overflows or underflows. `lrint`, `lround` and their `ll` forms
+return an unspecified value, without an error, when the result does not
+fit.
 
 **Signals.** `<signal.h>` defines `SIGABRT` (6), `SIGFPE` (8), `SIGILL` (4),
 `SIGINT` (2), `SIGSEGV` (11) and `SIGTERM` (15). MOS has no signals: `raise`

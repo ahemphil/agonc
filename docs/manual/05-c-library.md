@@ -1,8 +1,11 @@
 # The C library
 
-agonc comes with the whole C89 library: all fifteen standard headers and
-every function and macro they declare, plus `<stdint.h>` and, in the default
-mode, C99's `long long` functions. This chapter is a reference to it. It
+agonc comes with C99's library but for `<complex.h>`, `<fenv.h>`,
+`<tgmath.h>`, `<wchar.h>` and `<wctype.h>`: C89's fifteen headers with
+every function and macro they declare, C99's additions to them, and C99's
+`<stdint.h>`, `<stdbool.h>`, `<inttypes.h>` and `<iso646.h>`. With `-ansi`
+it is the C89 library alone, and the four new headers. This chapter is a
+reference to it. It
 does not explain the standard library itself; for each header it lists what
 is there and then says what is particular to agonc and the Agon: the limits,
 the choices the standard leaves to the implementation, and the places where
@@ -13,7 +16,7 @@ interface to MOS and the VDP beyond the standard library is in
 
 ## How the library is linked
 
-The library lives in `/lib` on the SD card, with the headers:
+The library lives in `/lib/agonc` on the SD card, with the headers:
 
 | File | Contents | Linked |
 |---|---|---|
@@ -24,10 +27,10 @@ The library lives in `/lib` on the SD card, with the headers:
 | `libagon.s` | the rest of the MOS and VDP interface | when needed |
 
 `libm.s` holds everything with a floating-point or `long long` value in it:
-the arithmetic helpers the compiler calls for those types, the `%e %f %g`
-and `%lld` conversions of `printf` and `scanf`, the decimal conversion
-behind `strtod` and `atof`, `<math.h>`, and `strtoll` with the other
-`long long` functions. The driver adds it when any function in the program
+the arithmetic helpers the compiler calls for those types, the `%e %f %g
+%a` and `%lld` conversions of `printf` and `scanf`, the conversion behind
+`strtod`, `strtof` and `atof`, `<math.h>`, and `strtoll` with the other
+`long long` and `intmax_t` functions. The driver adds it when any function in the program
 has a `float`, `double` or `long long` value, so a program that uses none
 is linked without it; `-lm` adds it regardless, for a program whose only
 such values are in assembly. `-nostdlib` leaves out all five files. See
@@ -40,22 +43,30 @@ with floating point.
 
 ### What is there from C99
 
-The library is C89's. In the default mode it adds a few things from C99
-that existing programs use; `-ansi` hides those that need `long long`.
+The library is C89's, with C99's additions. `-ansi` hides the
+additions' names, as a C89 program may use them for its own functions; the
+four C99 headers stay, without what needs `long long`.
 
 | Addition | Default mode | Strict mode |
 |---|---|---|
-| `<stdint.h>` | yes, with 64-bit types | yes, without 64-bit types |
+| `<stdint.h>`, `<inttypes.h>` | yes, with 64-bit types | yes, without 64-bit types |
+| `<stdbool.h>` | yes | yes, with `bool` an `int` |
+| `<iso646.h>` | yes | yes |
 | `LLONG_MIN`, `LLONG_MAX`, `ULLONG_MAX` | yes | no |
 | `llabs`, `lldiv`, `lldiv_t`, `atoll`, `strtoll`, `strtoull` | yes | no |
+| `imaxabs`, `imaxdiv`, `imaxdiv_t`, `strtoimax`, `strtoumax` | yes | no |
+| `snprintf`, `vsnprintf`, `vscanf`, `vfscanf`, `vsscanf` | yes | no |
+| `strtof`, `strtold`, `_Exit`, `isblank`, `va_copy` | yes | no |
 | `printf` and `scanf` length modifiers `ll` and `j` | yes | no |
+| C99's `<math.h>`: its functions, their `float` and `long double` forms, the macros | yes | no |
+| `printf` and `scanf` length modifiers `hh`, `z` and `t`, and `%a` | yes | yes |
+| hexadecimal, `inf` and `nan` read by `strtod`, `atof` and `scanf` | yes | no, as C89 requires |
 | `%F` in `printf` and `scanf` | yes | yes |
 | `%e` in `strftime` | yes | yes |
 
-Not provided: `snprintf`, `vsnprintf`, `va_copy`, `isblank`, the length
-modifiers `hh`, `z` and `t`, `%a`, C99's additions to `<math.h>` (`round`,
-`trunc`, `isnan` and the rest), `strtof`, `_Exit`, and the headers
-`<stdbool.h>`, `<inttypes.h>`, `<wchar.h>` and `<wctype.h>`.
+C99's `<math.h>` is all there in the default mode
+([below](#c99s-additions)). Not planned: `<complex.h>`, `<fenv.h>`,
+`<tgmath.h>`, `<wchar.h>` and `<wctype.h>`.
 
 ## The library on the Agon
 
@@ -222,6 +233,7 @@ include guard, so including it again after changing `NDEBUG` redefines
 |---|---|
 | `int isalnum(int c)` | a letter or a digit |
 | `int isalpha(int c)` | `A`-`Z`, `a`-`z` |
+| `int isblank(int c)` | space and `\t` (C99; default mode) |
 | `int iscntrl(int c)` | 0 to 31, and 127 |
 | `int isdigit(int c)` | `0`-`9` |
 | `int isgraph(int c)` | 33 to 126: printable, not space |
@@ -310,6 +322,42 @@ The software is exact IEEE 754:
 
 The results are deterministic and the same, bit for bit, as a PC's IEEE
 arithmetic, which makes a PC a good place to check them.
+
+## `<inttypes.h>`
+
+C99's header, provided in both modes. It includes `<stdint.h>`, and adds
+the macros that give `printf` and `scanf` the right length modifier for
+each of its types, and (default mode) four functions for `intmax_t`.
+
+```c
+int32_t n = 100000;
+printf("%" PRId32 " items\n", n);      /* "%ld" here */
+```
+
+The `PRI` macros are for `printf`: `PRId`*N*, `PRIi`*N*, `PRIo`*N*,
+`PRIu`*N*, `PRIx`*N* and `PRIX`*N* for N = 8, 16, 24, 32 and (default mode)
+64, with the `LEAST` and `FAST` forms, `PTR` and `MAX`. The `SCN` macros
+are for `scanf`, the same without `X`. The 8- and 16-bit types print as
+the `int` they are promoted to, but scan with `hh` and `h`, which store
+just their bytes.
+
+| Function (default mode) | What it does |
+|---|---|
+| `intmax_t imaxabs(intmax_t j)` | `llabs` |
+| `imaxdiv_t imaxdiv(intmax_t n, intmax_t d)` | `lldiv`, with members `quot` and `rem` |
+| `intmax_t strtoimax(const char *s, char **end, int base)` | `strtoll` |
+| `uintmax_t strtoumax(const char *s, char **end, int base)` | `strtoull` |
+
+`intmax_t` is `long long`, so these are the `long long` functions under
+other names. The wide-character forms, `wcstoimax` and `wcstoumax`, are
+not provided.
+
+## `<iso646.h>`
+
+Macros that spell operators as words, for keyboards without the
+characters: `and` (`&&`), `and_eq` (`&=`), `bitand` (`&`), `bitor` (`|`),
+`compl` (`~`), `not` (`!`), `not_eq` (`!=`), `or` (`||`), `or_eq` (`|=`),
+`xor` (`^`) and `xor_eq` (`^=`). Provided in both modes.
 
 ## `<limits.h>`
 
@@ -408,6 +456,55 @@ or pi with the signs IEEE 754 prescribes. `exp`, `pow` and `ldexp` can
 overflow or underflow, and `sinh` and `cosh` can overflow; `pow(x, 0)` is 1
 for every `x`, even a NaN.
 
+### C99's additions
+
+In the default mode `<math.h>` has the whole of C99's 7.12, in the
+library units `math99.c` and `mathf.c`:
+
+| Kind | Functions |
+|---|---|
+| exponentials, logarithms | `exp2`, `expm1`, `log1p`, `log2`, `logb`, `ilogb`, `scalbn`, `scalbln` |
+| powers | `cbrt`, `hypot` |
+| hyperbolic | `asinh`, `acosh`, `atanh` |
+| error and gamma | `erf`, `erfc`, `lgamma`, `tgamma` |
+| to integers | `trunc`, `round`, `lround`, `llround`, `rint`, `lrint`, `llrint`, `nearbyint` |
+| remainders | `remainder`, `remquo` |
+| the rest | `copysign`, `nan`, `nextafter`, `nexttoward`, `fdim`, `fmax`, `fmin`, `fma` |
+
+Every function, C89's and C99's, also has a `float` form and a `long
+double` form: `sinf`, `sinl` and so on. `long double` is `double`, so the
+`l` forms are the double functions. A `float` form works in `double` and
+rounds once, so its results are nearly always the correctly rounded
+`float`. The macros are there too: `fpclassify`, `isfinite`, `isinf`,
+`isnan`, `isnormal` and `signbit`, which take a `float` or a `double`; the
+comparisons `isgreater` and the rest, which are quiet for a NaN; `INFINITY`,
+`NAN`, `HUGE_VALF`, `HUGE_VALL`, `FP_NAN` and the other classes, `FP_ILOGB0`,
+`FP_ILOGBNAN`, `float_t` and `double_t` (`float` and `double`), and
+`math_errhandling`, which is `MATH_ERRNO`: there is no floating-point
+environment, `<fenv.h>`, so errors are reported in `errno` only, and the
+rounding is always to nearest.
+
+**Accuracy.** Most of the algorithms are fdlibm's again. `exp2`, `log2`,
+`tgamma`, `remquo` and `fma` are agonc's own, built on the others: `fma`
+forms its product exactly and rounds once, as C99 asks. Measured against
+true values, the errors are below one unit in the last place for most
+functions, below two for `acosh`, `atanh`, `erfc` and `lgamma`, and below
+five for `tgamma`. `lgamma` of a negative argument near one of its zeros
+(near -2.457, say) has a small result made as the difference of two large
+ones, so its relative error grows there. The rounding functions, `fma`,
+`remainder`, `remquo`, `fdim`, `fmax`, `fmin`, `nextafter`, `copysign`,
+`logb` and `ilogb` are exact.
+
+**Errors** follow the table above: `log1p(-1)`, `log2(0)`, `logb(0)`,
+`atanh(+-1)`, `lgamma` and `tgamma` at their poles (0 and the negative
+integers for `lgamma`, +-0 for `tgamma`) give an infinity and `ERANGE`;
+`tgamma` of a negative integer, `ilogb` of 0, an infinity or a NaN, and
+`fma` of an infinity times 0 are domain errors. `nextafter` sets `ERANGE`
+when its result is subnormal, zero or infinite. A `float` form also sets
+`ERANGE` when only the `float` overflows or underflows. The integer
+results of `lrint`, `lround` and their `ll` forms are unspecified when the
+value does not fit, as in C99.
+
 ## `<setjmp.h>`
 
 | Name | What it does |
@@ -497,8 +594,15 @@ argument takes a multiple of 3 bytes on the stack: an `int` or a pointer
 takes 3, a `long` 6, and a `double` or `long long` 9. As in any C,
 arguments of a variable list are promoted, so `va_arg(ap, int)`
 reads a `char` or `short` argument and `va_arg(ap, double)` a `float`.
-There is no `va_copy`; as `va_list` is a pointer, assigning one `va_list` to
-another copies it.
+C99's `va_copy(dest, src)` (default mode) copies a `va_list`; as `va_list`
+is a pointer, it is an assignment.
+
+## `<stdbool.h>`
+
+C99's `bool`, `true` (1), `false` (0) and `__bool_true_false_are_defined`
+(1). In the default mode `bool` is `_Bool`, so storing any non-zero value
+in one stores 1. In strict mode, which has no `_Bool`, `bool` is `int`, and
+a value stored in one is kept as it is.
 
 ## `<stddef.h>`
 
@@ -540,8 +644,8 @@ The limits are there for every type: `INTN_MIN`, `INTN_MAX` and
 `UINTPTR_MAX`, `INTMAX_MIN`, `INTMAX_MAX`, `UINTMAX_MAX`, and also
 `PTRDIFF_MIN`, `PTRDIFF_MAX`, `SIZE_MAX` (16777215), `WCHAR_MIN` and
 `WCHAR_MAX`. The constant macros `INTN_C` and `UINTN_C` (N = 8 to 64),
-`INTMAX_C` and `UINTMAX_C` add the right suffix to a constant. There is no
-`<inttypes.h>`: print an `int32_t` with `%ld` and an `int64_t` with `%lld`.
+`INTMAX_C` and `UINTMAX_C` add the right suffix to a constant. To print
+these types, use [`<inttypes.h>`](#inttypesh)'s macros.
 
 ## `<stdio.h>`
 
@@ -703,12 +807,16 @@ its temporary file behind in `/tmp`.
 | `int vprintf(const char *fmt, va_list ap)` | `stdout`, from a `va_list` |
 | `int vfprintf(FILE *f, const char *fmt, va_list ap)` | `f`, from a `va_list` |
 | `int vsprintf(char *s, const char *fmt, va_list ap)` | memory, from a `va_list` |
+| `int snprintf(char *s, size_t n, const char *fmt, ...)` | memory, at most `n` bytes with the null (default mode) |
+| `int vsnprintf(char *s, size_t n, const char *fmt, va_list ap)` | the same, from a `va_list` (default mode) |
 
 Each returns the number of characters produced. A write error does not
 change the count; check `ferror`. `sprintf` and `vsprintf` cannot check the
-size of their buffer, and there is no `snprintf`, so make the buffer large
-enough for the longest result: 12 bytes hold any `long` in decimal with its
-sign and null, and 21 any `long long`.
+size of their buffer; `snprintf` and `vsnprintf` store at most `n - 1`
+characters and a null, and return the length the whole result would have
+had, so a return of `n` or more means it was cut short. With `n` 0 they
+store nothing, and `s` may be a null pointer: `snprintf(NULL, 0, ...)`
+measures a result.
 
 The conversions:
 
@@ -724,6 +832,7 @@ The conversions:
 | `%f`, `%F` | `double` | `[-]ddd.dddddd` |
 | `%e`, `%E` | `double` | `[-]d.dddddde+dd` |
 | `%g`, `%G` | `double` | `%e` or `%f` style by the exponent, without trailing zeros |
+| `%a`, `%A` | `double` | hexadecimal: `[-]0x1.hhhp+d`, `0X` and `P` for `%A` |
 | `%n` | `int *` | nothing; stores the count so far |
 | `%%` | none | `%` |
 
@@ -737,10 +846,12 @@ The conversions:
 
 | Length | Argument |
 |---|---|
+| `hh` | `signed char` or `unsigned char` (passed as `int`, converted back) |
 | `h` | `short` or `unsigned short` (passed as `int`, converted back) |
 | `l` | `long` or `unsigned long`; for `%n`, `long *` |
 | `ll`, `j` | `long long` or `unsigned long long` (default mode) |
-| `L` | `long double` for `%e %f %g`, which is `double` |
+| `z`, `t` | `size_t` and `ptrdiff_t`, which are `unsigned int` and `int` |
+| `L` | `long double` for `%e %f %g %a`, which is `double` |
 
 A width and a precision may be numbers or `*`, taken from the arguments; a
 negative `*` width means `-` and that width, and a negative `*` precision
@@ -755,9 +866,17 @@ after a `-` when the sign bit is set, and in capitals for `%E %F %G`; the
 `0` flag pads them with spaces. `%F` is C99's: `%f` with `INF` and `NAN` in
 capitals. A `float` argument arrives as a `double`, as in any C.
 
+`%a` prints the bits themselves, so it is exact: the leading digit is 1 (0
+for zero and the subnormals, whose exponent is then `-1022`), then the
+fraction's hexadecimal digits without trailing zeros, then `p` and the
+power of two in decimal: `printf("%a", 0.1)` prints
+`0x1.999999999999ap-4`. A precision rounds the fraction to that many
+digits, to nearest even, and may carry into the leading digit:
+`printf("%.0a", 1.5)` prints `0x2p+0`, as glibc does. The `0` flag pads
+after the `0x`.
+
 Flags that make no sense for a conversion (a `+` on `%u`, a `#` on `%d`)
-are ignored. The length modifiers `hh`, `z` and `t` and the conversion
-`%a` do not exist; a format that uses one prints wrongly.
+are ignored.
 
 ### Formatted input
 
@@ -768,8 +887,8 @@ are ignored. The length modifiers `hh`, `z` and `t` and the conversion
 | `int sscanf(const char *s, const char *fmt, ...)` | the string `s` |
 
 Each returns the number of items assigned, or `EOF` if the input ended
-before the first conversion. There are no `v` forms (`vscanf` and the rest
-are C99's).
+before the first conversion. In the default mode C99's `vscanf`,
+`vfscanf` and `vsscanf` take a `va_list` instead.
 
 | Conversion | Reads | Stores to |
 |---|---|---|
@@ -779,16 +898,17 @@ are C99's).
 | `%o` | an octal integer | `unsigned int *` |
 | `%x`, `%X` | a hexadecimal integer, with or without `0x` | `unsigned int *` |
 | `%p` | hexadecimal, as `%p` prints it | `void **` |
-| `%e %f %g %E %F %G` | a floating constant, as `strtod` reads it | `float *` |
+| `%e %f %g %a %E %F %G %A` | a floating constant, as `strtod` reads it | `float *` |
 | `%s` | characters up to white space | `char *`, with a null added |
 | `%c` | exactly the width in characters (default 1) | `char *`, no null added |
 | `%[...]` | characters in the set (or, after `^`, not in it) | `char *`, with a null added |
 | `%n` | nothing | `int *`: the characters read so far |
 | `%%` | a `%` | nothing |
 
-`h` stores to a `short`, `l` to a `long` (or, for the floating
-conversions, a `double`), `L` to a `long double`, which is a `double`, and
-`ll` or `j` to a `long long` (default mode). Remember the `l` for a
+`hh` stores to a `char`, `h` to a `short`, `l` to a `long` (or, for the
+floating conversions, a `double`), `L` to a `long double`, which is a
+`double`, `ll` or `j` to a `long long` (default mode), and `z` and `t` to
+a `size_t` and a `ptrdiff_t`. Remember the `l` for a
 `double`: `%f` stores a `float`. `*` after the `%` reads an item without
 storing it, and a width limits the characters read; a sign and a `0x`
 prefix count towards it.
@@ -804,11 +924,13 @@ descending order, is an ordinary member: `%[-a]`, `%[a-]`, and `%[z-a]` is
 the three characters `z`, `-` and `a`.
 
 Integers that overflow wrap round, without an error. A floating value is
-converted directly from its decimal form to the type stored, so a `float`
-is correctly rounded too. Only C89's forms are read: no `inf`, `nan` or
-hexadecimal floating constants. The input can be given back by only one
-character, so `"1e"` followed by a letter is a matching failure for
-`%f`, with both characters consumed.
+converted directly from what was read to the type stored, so a `float` is
+correctly rounded too. In the default mode C99's forms are read as well,
+as `strtod` reads them: hexadecimal (`0x1.8p3`), `inf`, `infinity` and
+`nan`; strict mode reads C89's only. The input can
+be given back by only one character, so `"1e"` followed by a letter is a
+matching failure for `%f`, with both characters consumed, and so is
+`"0x"` without a hexadecimal digit after it.
 
 `scanf` reads the keyboard a line at a time
 ([Reading the keyboard](#reading-the-keyboard)), and the console never
@@ -831,6 +953,8 @@ The types `size_t`, `wchar_t`, `div_t`, `ldiv_t` and (default mode)
 | `long long atoll(const char *s)` | a decimal `long long` (default mode) |
 | `double atof(const char *s)` | a `double` |
 | `double strtod(const char *s, char **end)` | a `double`, and where it ended |
+| `float strtof(const char *s, char **end)` | a `float` (default mode) |
+| `long double strtold(const char *s, char **end)` | a `long double`, which is `strtod` (default mode) |
 | `long strtol(const char *s, char **end, int base)` | a `long` in base 2 to 36, or by its prefix with base 0 |
 | `unsigned long strtoul(const char *s, char **end, int base)` | the same, `unsigned long` |
 | `long long strtoll(const char *s, char **end, int base)` | the same, `long long` (default mode) |
@@ -851,12 +975,20 @@ functions, minimum) and sets `ERANGE`; the digits after the point where it
 overflowed are still consumed. `strtoul` and `strtoull` negate a value
 after a `-` in their unsigned type, as C says.
 
-`strtod` reads C89's forms only: digits with an optional point and an
-optional exponent, but no `inf`, `nan` or hexadecimal forms. The result is
-correctly rounded. A result that overflows gives `HUGE_VAL` (with the sign)
-and one that underflows to zero gives 0, both setting `ERANGE`; a
-subnormal result does not set it. A trailing `e` with no digits after it is
-not part of the number: `strtod("1e", &end)` is 1, with `end` at the `e`.
+`strtod` reads digits with an optional point and an optional exponent,
+and in the default mode C99's forms: hexadecimal digits after `0x` with an
+optional point and an optional `p` exponent, a power of two (`0x1.8p3` is
+12); `inf` or `infinity`; and `nan`, optionally followed by letters, digits
+and `_` in parentheses, all in either case. In strict mode, as C89
+requires, `strtod("inf", &end)` converts nothing and `strtod("0x1p3",
+&end)` reads only the `0`; `atof` and `scanf` follow `strtod`. The result
+is correctly rounded. A result
+that overflows gives `HUGE_VAL` (with the sign) and one that underflows to
+zero gives 0, both setting `ERANGE`; a subnormal result does not set it. A
+trailing `e` or `p` with no digits after it is not part of the number:
+`strtod("1e", &end)` is 1, with `end` at the `e`, and `strtod("0x", &end)`
+is 0, with `end` at the `x`. `strtof` does the same for a `float`, rounded
+once from the text itself rather than through a `double`.
 
 ### Memory
 
@@ -883,6 +1015,7 @@ does nothing. The heap itself is described [above](#the-heap).
 | `void exit(int status)` | runs the `atexit` functions, closes the streams, ends the program |
 | `void abort(void)` | raises `SIGABRT`; closes the files unflushed and ends with status 134 |
 | `int atexit(void (*f)(void))` | registers a function for `exit` to call |
+| `void _Exit(int status)` | closes the streams and ends the program, without the `atexit` functions (default mode) |
 
 `exit` calls the `atexit` functions in the reverse of the order they were
 registered, then writes out and closes every stream, removes the files
@@ -895,6 +1028,10 @@ itself a second time.
 closes every file without writing what its buffer holds, so that no MOS
 handle is lost, and ends the program with status 134. The `atexit`
 functions do not run.
+
+C99's `_Exit` runs neither the `atexit` functions nor any signal handler,
+but it still writes out and closes the streams, which C99 leaves to the
+implementation, since otherwise MOS would lose their handles.
 
 ### Arithmetic and random numbers
 
@@ -1006,7 +1143,9 @@ and `wctomb` with a null `s` return 0: there are no shift states.
 
 The comparisons treat bytes as `unsigned char`, as C requires, so a byte
 above 0x7F sorts after every ASCII character even though `char` is signed.
-The functions are simple byte loops in C. `strchr` and `strrchr` find the
+`strlen`, `strcmp`, `strcpy`, `strcat`, `strchr`, `memcpy`, `memmove`,
+`memset` and `memchr` are in assembly, using the eZ80's block
+instructions; the rest are byte loops in C. `strchr` and `strrchr` find the
 terminating null when `c` is 0. `strncpy` adds no null when `s` has `n`
 characters or more; `strncat` always adds one. `strstr` with an empty
 `find` returns `s`. `strxfrm` copies `s` only if it fits in `n` bytes with

@@ -497,12 +497,58 @@ void test_fnptr(void)
     check((**fp)(6), 12);
 }
 
+/* A bit-field is read and stored as the bytes it occupies and no more: one
+ * byte up to 8 bits, two up to 16, three up to 24. The byte after each
+ * field here is assigned inside the field's own assignment, which the
+ * field's store must not undo (it once wrote back a third byte it had read
+ * before the right-hand side ran). */
+struct units {
+    unsigned w12 : 12;
+    unsigned char after12;
+    unsigned w16 : 16;
+    unsigned char after16;
+    unsigned w20 : 20;
+    unsigned char after20;
+    int s12 : 12;
+    unsigned char after_s;
+};
+
+void test_bit_units(void)
+{
+    struct units u;
+
+    check(sizeof(struct units), 2 + 1 + 2 + 1 + 3 + 1 + 2 + 1);
+    u.after12 = 1;
+    u.after16 = 2;
+    u.after20 = 3;
+    u.after_s = 4;
+    u.w12 = (u.after12 = 7);
+    check(u.after12, 7);
+    check(u.w12, 7);
+    u.w16 = (u.after16 = 0x55);
+    check(u.after16, 0x55);
+    check(u.w16, 0x55);
+    u.w20 = (u.after20 = 9);
+    check(u.after20, 9);
+    check(u.w20, 9);
+    u.s12 = (u.after_s = 6) - 8;
+    check(u.after_s, 6);
+    check(u.s12, -2);
+    u.w16 = 0xFFFF;                     /* all 16 bits, and the next byte kept */
+    check(u.w16, 0xFFFF);
+    check(u.after16, 0x55);
+    u.w12 += 0xFFF;                     /* 7 + 4095 wraps in 12 bits */
+    check(u.w12, 6);
+    check(u.after12, 7);
+}
+
 int main(void)
 {
     test_scope();
     test_decls();
     test_union();
     test_bits();
+    test_bit_units();
     test_fnptr();
     if (fails == 0)
         agon_emu_exit(0);

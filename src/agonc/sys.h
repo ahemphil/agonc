@@ -9,7 +9,7 @@
  * The interface is small and string-based (no FILE, no heap, no struct):
  * the Agon back end sits directly on MOS's calls (agon/mos.h), the host
  * one on stdio, and agonc.c never knows which it has. Every path is a
- * plain C string; "/lib" and the like are made by agonc.c from sys_root().
+ * plain C string; "/lib/agonc" and the like are made by agonc.c from sys_root().
  */
 
 #ifndef SYS_H
@@ -24,7 +24,7 @@ void sys_init(char *argv0);
 void sys_out(char *s);
 void sys_err(char *s);
 
-/* The prefix of /lib, /usrlib and /tmp: "" on the Agon, $AGONC_ROOT on the
+/* The prefix of /lib/agonc, /usrlib and /tmp/agonc: "" on the Agon, $AGONC_ROOT on the
  * host (driver.md section 4). */
 char *sys_root(void);
 

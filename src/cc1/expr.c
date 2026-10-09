@@ -47,6 +47,7 @@ struct sf64 fbits[MAX_NODES];   /* a floating constant node's bits (a float's in
 int nnodes;
 int peak_nodes;
 int in_function;
+char *cur_func_name = "";
 int fp_used;
 int ll_used;
 
@@ -57,11 +58,8 @@ int ll_used;
  * the printf and scanf conversions for those types into the program. */
 int node(int op, int type, int a, int b, int val)
 {
-    if (nnodes >= MAX_NODES) {
-        fprintf(stderr, "%s:%d: error: expression too complex (a cc1 table limit; raise MAX_NODES)\n",
-                cur_file, tok_line);
-        fatal("");
-    }
+    if (nnodes >= MAX_NODES)
+        fatal("expression too complex (a cc1 table limit; raise MAX_NODES)");
     nodes[nnodes].op = op;
     nodes[nnodes].type = type;
     nodes[nnodes].a = a;
@@ -268,6 +266,8 @@ static int pure(int n)
 }
 
 static int conv(int n, int t);
+static int mk_compare(int tk, int a, int b);
+static int is_simple_lvalue(int n);
 
 /* ---- bit-fields ----------------------------------------------------------------- */
 
@@ -329,7 +329,7 @@ static int bf_store(int lv, int v)
     p = nodes[lv].a;
     off = nodes[lv].val;
     w = nodes[lv].c;
-    ut = w <= 8 ? T_UCHAR : T_UINT;
+    ut = w <= 8 ? T_UCHAR : w <= 16 ? T_USHORT : T_UINT;     /* the bytes the field occupies (emit.c) */
     mask = w < 24 ? (1 << w) - 1 : 0xFFFFFF;
     unit = node(EN_DEREF, ut, p, -1, 0);
     keep = node(EN_BIN, T_UINT, conv(unit, T_UINT), num(wrap24(~(mask << off)), T_UINT), B_AND);
@@ -344,6 +344,23 @@ static int bf_store(int lv, int v)
 static int with_pre(int pre, int n)
 {
     return pre < 0 ? n : node(EN_COMMA, nodes[n].type, pre, n, 0);
+}
+
+/* bf_stable's counterpart for an ordinary lvalue, for a = (T)(a op b):
+ * lv itself if its address is simple, else *tmp, with *pre the
+ * assignment tmp = &lv. */
+static int lv_stable(int lv, int *pre)
+{
+    int pt;
+    int tmp;
+
+    *pre = -1;
+    if (is_simple_lvalue(lv))
+        return lv;
+    pt = ptr_to(nodes[lv].type);
+    tmp = new_temp(pt);
+    *pre = node(EN_ASSIGN, pt, node(EN_LVAR, pt, -1, -1, tmp), node(EN_ADDR, pt, lv, -1, 0), 0);
+    return node(EN_DEREF, nodes[lv].type, node(EN_LVAR, pt, -1, -1, tmp), -1, 0);
 }
 
 /* ---- constant folding (exact 24-bit semantics on any host) ------------------ */
@@ -418,6 +435,8 @@ static int fold_cast(int v, int t)
     int k;
 
     k = types[t].kind;
+    if (k == TY_BOOL)
+        return v != 0;
     if (k == TY_CHAR || k == TY_SCHAR)
         return ((v & 255) ^ 128) - 128;
     if (k == TY_UCHAR)
@@ -659,6 +678,16 @@ static int fold_conv(int n, int s, int t)
     return num32(&v, t);
 }
 
+/* n, a number or pointer, converted to C99's _Bool: 0 if it compares
+ * equal to 0, else 1, whatever its low bits (0.5 and 256 are both 1). */
+static int to_bool(int n)
+{
+    n = mk_compare(P_NE, n, num(0, T_INT));
+    if (is_const(n))
+        return num(nodes[n].val, T_BOOL);
+    return node(EN_CAST, T_BOOL, n, -1, 0);
+}
+
 /* n converted to arithmetic type t, as C89 3.2.1 says. Between int-sized
  * types of one width nothing changes (the IR has no types); between widths
  * and kinds a CAST says how (emit.c writes EXT or CV). An int-sized value
@@ -676,6 +705,8 @@ static int conv(int n, int t)
     s = value_type(n);
     if (s == t)
         return n;
+    if (types[t].kind == TY_BOOL)
+        return to_bool(n);
     if (is_floating(s) || is_floating(t)) {
         if (is_const(n) && is_arith(s))
             return fold_conv(n, s, t);
@@ -934,7 +965,7 @@ int convert(int n, int t, char *what)
         return conv(n, t);
     }
     if (is_integer(t)) {
-        if (is_floating(s))
+        if (is_floating(s) || (is_pointer(s) && types[t].kind == TY_BOOL))
             return conv(n, t);
         if (is_pointer(s)) {
             sprintf(buf, "pointer converted to integer without a cast (%s)", what);
@@ -996,7 +1027,7 @@ static int call(int fsym, int ft, int fp)
     n = 0;
     if (tok != TK_P + ')') {
         for (;;) {
-            if (n > MAX_ARGS_CALL)
+            if (n >= MAX_ARGS_CALL)
                 fatal("more than 31 arguments in a call");
             args[n] = assign_expr();
             n++;
@@ -1286,6 +1317,15 @@ static int primary(void)
     }
     if (tok == TK_IDENT) {
         s = find_local(tok_name);
+        /* C99's __func__, the function's name as if a static char array
+         * were declared first in its body (a name with two underscores is
+         * the implementation's, so both modes have it) */
+        if (s < 0 && in_function && strcmp(name_str(tok_name), "__func__") == 0) {
+            t = array_of(T_CHAR, (int)strlen(cur_func_name) + 1);
+            n = node(EN_STR, t, -1, -1, func_string(cur_func_name, (int)strlen(cur_func_name)));
+            next();
+            return n;
+        }
         if (s >= 0 && locals[s].kind == LK_GLOBAL) {
             s = locals[s].offset;       /* a block-scope extern or static: the global below */
         } else if (s >= 0) {
@@ -1374,6 +1414,28 @@ static int deref(int p)
     return node(EN_DEREF, types[t].base, p, -1, 0);
 }
 
+/* ++ or -- of a _Bool (C99): b + 1 or b - 1 converted back to _Bool,
+ * which sets b to 1 or flips it, not EN_INC's wrapping byte; the address
+ * once, a post form's old value kept in a temporary. A _Bool bit-field
+ * stores through bf_store. */
+static int bool_inc(int n, int kind)
+{
+    int pre;
+    int r;
+    int set;
+    int old;
+
+    n = nodes[n].op == EN_BITF ? bf_stable(n, &pre) : lv_stable(n, &pre);
+    r = conv(kind < 2 ? mk_add(n, num(1, T_INT)) : mk_sub(n, num(1, T_INT)), T_BOOL);
+    set = nodes[n].op == EN_BITF ? bf_store(n, r) : node(EN_ASSIGN, T_BOOL, n, r, 0);
+    if (kind == 1 || kind == 3) {
+        old = new_temp(T_BOOL);
+        set = node(EN_COMMA, T_BOOL, node(EN_ASSIGN, T_BOOL, node(EN_LVAR, T_BOOL, -1, -1, old), n, 0),
+                   node(EN_COMMA, T_BOOL, set, node(EN_LVAR, T_BOOL, -1, -1, old), 0), 0);
+    }
+    return with_pre(pre, set);
+}
+
 /* ++ or -- on n, kind as EN_INC's val: 0 ++x, 1 x++, 2 --x, 3 x--. An
  * ordinary lvalue becomes one EN_INC node (cc2 scales a pointer's step by
  * the size emit.c passes); a bit-field is lowered to a store. */
@@ -1382,6 +1444,8 @@ static int mk_inc(int n, int kind)
     int pre;
     int v;
 
+    if (nodes[n].type == T_BOOL && nodes[n].op == EN_BITF)
+        return bool_inc(n, kind);
     if (nodes[n].op == EN_BITF) {
         /* x++ is (x += 1) - 1, re-extended to the field's width */
         n = bf_stable(n, &pre);
@@ -1397,6 +1461,8 @@ static int mk_inc(int n, int kind)
         error("'++' or '--' of a const object");
     else
         need_scalar(n, "'++'/'--'");
+    if (types[nodes[n].type].kind == TY_BOOL)
+        return bool_inc(n, kind);
     return node(EN_INC, nodes[n].type, n, -1, kind);
 }
 
@@ -1456,11 +1522,13 @@ static int member(int n, int arrow)
          * to 16 bits the third byte is beyond the field (the next member,
          * or past the struct) and is written back as read. The node's
          * type is int, as a bit-field's value promotes to int, unless a
-         * 24-bit unsigned field needs unsigned int to hold it. */
+         * 24-bit unsigned field needs unsigned int to hold it; a _Bool
+         * field's is _Bool, which tells a store to convert to 0 or 1. */
         p = node(EN_BIN, ptr_to(T_UCHAR), node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0), num(off, T_INT), B_ADD);
         if (members[m].width > 8)
             p = node(EN_CAST, ptr_to(T_UINT), p, -1, 0);
-        p = node(EN_BITF, members[m].width < 24 || !is_unsigned(mt) ? T_INT : T_UINT, p, -1, members[m].bit);
+        p = node(EN_BITF, types[mt].kind == TY_BOOL ? T_BOOL : members[m].width < 24 || !is_unsigned(mt) ? T_INT : T_UINT,
+                 p, -1, members[m].bit);
         nodes[p].c = members[m].width;
         nodes[p].hi8 = !is_unsigned(mt);
         return p;
@@ -1476,13 +1544,20 @@ static int member(int n, int arrow)
 
 /* A primary followed by any number of [] () . -> ++ --, applied left to
  * right in a loop. */
+static int postfix_ops(int n);
+
 static int postfix(void)
 {
-    int n;
+    return postfix_ops(primary());
+}
+
+/* The postfix operators after n (a primary expression, or a compound
+ * literal): [] ++ -- () . -> */
+static int postfix_ops(int n)
+{
     int i;
     int t;
 
-    n = primary();
     for (;;) {
         if (accept(TK_P + '[')) {
             i = expression();
@@ -1549,6 +1624,29 @@ static int sizeof_operand(void)
     t = nodes[n].type;                  /* not decayed: sizeof an array is the array's size */
     if (nodes[n].op == EN_BITF)
         error("sizeof a bit-field");
+    nnodes = mark;
+    nlocals = nloc;
+    fp_used = fp;
+    ll_used = ll;
+    return t;
+}
+
+/* sizeof (type){ ... } and the postfix operators after it: its type, with
+ * nothing it made kept but the literal's static object, unused. */
+static int sizeof_literal(int t)
+{
+    int mark;
+    int nloc;
+    int fp;
+    int ll;
+    int n;
+
+    mark = nnodes;
+    nloc = nlocals;
+    fp = fp_used;
+    ll = ll_used;
+    n = postfix_ops(compound_literal(t));
+    t = nodes[n].type;
     nnodes = mark;
     nlocals = nloc;
     fp_used = fp;
@@ -1651,6 +1749,8 @@ static int unary(void)
             next();
             t = parse_type_name();
             expect(TK_P + ')', "')'");
+            if (!strict && tok == TK_P + '{')
+                return sizeof_value(sizeof_literal(t));
             return sizeof_value(t);
         }
         return sizeof_value(sizeof_operand());
@@ -1671,6 +1771,8 @@ static int cast_expr(void)
         next();
         t = parse_type_name();
         expect(TK_P + ')', "')'");
+        if (!strict && tok == TK_P + '{')
+            return postfix_ops(compound_literal(t));      /* C99's (type){ ... } */
         n = cast_expr();
         s = value_type(n);
         if (types[t].kind == TY_VOID)
@@ -1684,7 +1786,7 @@ static int cast_expr(void)
             return n;
         }
         t = unqual(t);
-        if (is_const(n) && is_arith(t) && is_arith(s))
+        if ((is_const(n) && is_arith(t) && is_arith(s)) || types[t].kind == TY_BOOL)
             return conv(n, t);
         if (is_const(n) && (is_pointer(t) || is_pointer(s)) && !is_long(s) && type_size(t) == 3)
             return num(nodes[n].val, t);        /* a constant still: offsetof's &((T *)0)->m */
@@ -1853,6 +1955,18 @@ static int asg_op(int tk)
     return 0;
 }
 
+/* a op= b as a = (T)(a op b), for when computing in a's own type (an
+ * ASG record) would differ; a's address computed once (lv_stable). */
+static int asg_recompute(int a, int op, int b, int t)
+{
+    int pre;
+    int r;
+
+    a = lv_stable(a, &pre);
+    r = op == TK_P + '+' ? mk_add(a, b) : op == TK_P + '-' ? mk_sub(a, b) : mk_arith(op, a, b);
+    return with_pre(pre, node(EN_ASSIGN, t, a, conv(r, t), 0));
+}
+
 /* An assignment expression: a conditional, or lvalue = or op= another
  * assignment expression (so a = b = c groups to the right). Plain = is
  * one EN_ASSIGN. a op= b evaluates a's address once, which C requires
@@ -1870,9 +1984,6 @@ int assign_expr(void)
     int op;
     int t;
     int r;
-    int tmp;
-    int p;
-    int d;
     int pre;
 
     a = conditional();
@@ -1896,6 +2007,14 @@ int assign_expr(void)
          * current value), then bf_store; a long value is cut to 24 bits,
          * which a field never exceeds */
         a = bf_stable(a, &pre);
+        if (nodes[a].type == T_BOOL) {
+            if (tk != TK_P + '=') {
+                need_arith(b, "compound assignment");
+                b = asg_op(tk) == TK_P + '+' ? mk_add(a, b) : asg_op(tk) == TK_P + '-' ? mk_sub(a, b)
+                    : mk_arith(asg_op(tk), a, b);
+            }
+            return with_pre(pre, bf_store(a, convert(b, T_BOOL, "assignment")));
+        }
         if (is_floating(value_type(b)))
             b = conv(b, is_unsigned(nodes[a].type) ? T_UINT : T_INT);
         need_integer(b, "assignment to a bit-field");
@@ -1908,6 +2027,10 @@ int assign_expr(void)
         return node(EN_ASSIGN, t, a, convert(b, t, "assignment"), 0);
     /* a op= b: the operator from the types of a and b, as for a op b */
     op = asg_op(tk);
+    if (types[t].kind == TY_BOOL) {
+        need_arith(b, "compound assignment");
+        return asg_recompute(a, op, b, t);
+    }
     if (is_pointer(t)) {
         /* p += n: n scaled by the element size, as for p + n */
         if (op != TK_P + '+' && op != TK_P + '-')
@@ -1927,15 +2050,7 @@ int assign_expr(void)
         if (arith_type(a, b) == t)
             return node(EN_ASGOP, t, a, conv(b, t), op == TK_P + '+' ? B_ADD : op == TK_P + '-' ? B_SUB
                         : op == TK_P + '*' ? B_MUL : B_DIVS);
-        if (is_simple_lvalue(a)) {
-            r = op == TK_P + '+' ? mk_add(a, b) : op == TK_P + '-' ? mk_sub(a, b) : mk_arith(op, a, b);
-            return node(EN_ASSIGN, t, a, conv(r, t), 0);
-        }
-        tmp = new_temp(ptr_to(t));
-        p = node(EN_ASSIGN, ptr_to(t), node(EN_LVAR, ptr_to(t), -1, -1, tmp), node(EN_ADDR, ptr_to(t), a, -1, 0), 0);
-        d = node(EN_DEREF, t, node(EN_LVAR, ptr_to(t), -1, -1, tmp), -1, 0);
-        r = op == TK_P + '+' ? mk_add(d, b) : op == TK_P + '-' ? mk_sub(d, b) : mk_arith(op, d, b);
-        return node(EN_COMMA, t, p, node(EN_ASSIGN, t, d, conv(r, t), 0), 0);
+        return asg_recompute(a, op, b, t);
     }
     need_integer(a, "compound assignment");
     need_integer(b, "compound assignment");
@@ -1943,18 +2058,8 @@ int assign_expr(void)
         && op != P_SHR) {
         /* a narrower lvalue op= a long or long long: computed in the wider
          * type, as a = (T)(a op b) */
-        if (op == TK_P + '/' || op == TK_P + '%') {
-            if (is_simple_lvalue(a)) {
-                r = mk_arith(op, a, b);
-                return node(EN_ASSIGN, t, a, conv(r, t), 0);
-            }
-            /* the object's address once, in a temporary: (tmp = &a, *tmp = *tmp op b) */
-            tmp = new_temp(ptr_to(t));
-            p = node(EN_ASSIGN, ptr_to(t), node(EN_LVAR, ptr_to(t), -1, -1, tmp), node(EN_ADDR, ptr_to(t), a, -1, 0), 0);
-            d = node(EN_DEREF, t, node(EN_LVAR, ptr_to(t), -1, -1, tmp), -1, 0);
-            r = mk_arith(op, d, b);
-            return node(EN_COMMA, t, p, node(EN_ASSIGN, t, d, conv(r, t), 0), 0);
-        }
+        if (op == TK_P + '/' || op == TK_P + '%')
+            return asg_recompute(a, op, b, t);
         /* + - * & | ^ give the same low bits computed in the narrower type */
         b = conv(b, promote(t));
     }

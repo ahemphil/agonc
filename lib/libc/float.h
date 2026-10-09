@@ -6,6 +6,10 @@
 
 #define FLT_RADIX 2
 #define FLT_ROUNDS 1
+#if !defined(__STRICT_ANSI__)
+#define FLT_EVAL_METHOD 0       /* C99: each operation in its own type */
+#define DECIMAL_DIG 17          /* C99: enough digits for any double to read back */
+#endif
 
 #define FLT_MANT_DIG 24
 #define FLT_EPSILON 1.19209290e-07F

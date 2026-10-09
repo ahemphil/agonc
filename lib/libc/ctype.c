@@ -42,6 +42,12 @@ int isspace(int c)
     return c == ' ' || (c >= 9 && c <= 13);
 }
 
+/* C99's: space and \t */
+int isblank(int c)
+{
+    return c == ' ' || c == '\t';
+}
+
 int isxdigit(int c)
 {
     return isdigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');

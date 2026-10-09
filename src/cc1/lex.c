@@ -640,22 +640,66 @@ static char fdigits[MAX_NUMBER + 1];    /* a floating constant's digits, the poi
  * long double with an l. The text is taken apart into what softfp.c's
  * decimal conversion wants: the digits with the point removed (fdigits,
  * nd of them) and a power of ten (exp10), so "12.5e3" is 125 times 10^2.
- * It is never negative: a leading '-' is unary minus, folded in expr.c. */
+ * It is never negative: a leading '-' is unary minus, folded in expr.c.
+ *
+ * A hexadecimal one (C99) is hex digits with an optional point and a
+ * binary exponent it must have: "0x1.8p3" is 1.5 times 2^3. Its first 16
+ * significant digits make a 64-bit integer, exactly; each later digit
+ * before the point multiplies by 16 (exp10 counts powers of two instead),
+ * and any later nonzero one is the sticky bit for softfp.c's rounding. */
 static void float_const(char *s)
 {
     int nd;
     int esign;
     long exp10;
     long e;
+    int hex;
+    int point;
+    int d;
+    int sticky;
+    unsigned long hi;
+    unsigned long lo;
 
     nd = 0;
     exp10 = 0;
-    while (is_digit(*s)) {
+    hex = s[0] == '0' && (s[1] == 'x' || s[1] == 'X');
+    if (hex) {
+        hi = 0;
+        lo = 0;
+        sticky = 0;
+        point = 0;
+        d = 0;                          /* whether there is a digit at all */
+        for (s = s + 2; *s == '.' ? !point : hex_digit(*s) >= 0; s++) {
+            if (*s == '.') {
+                point = 1;
+                continue;
+            }
+            if (nd < 16) {
+                if (nd > 0 || hex_digit(*s) != 0) {
+                    hi = (hi << 4 | lo >> 28) & 0xFFFFFFFFUL;
+                    lo = (lo << 4 & 0xFFFFFFFFUL) | (unsigned long)hex_digit(*s);
+                    nd++;
+                }
+                if (point)
+                    exp10 = exp10 - 4;
+            } else {
+                sticky = sticky | (hex_digit(*s) != 0);
+                if (!point)
+                    exp10 = exp10 + 4;
+            }
+            d = 1;
+        }
+        if (!d)
+            error("a hexadecimal floating constant with no digits");
+        if (*s != 'p' && *s != 'P')
+            error("a hexadecimal floating constant needs an exponent (p)");
+    }
+    while (!hex && is_digit(*s)) {
         fdigits[nd] = *s;
         nd++;
         s++;
     }
-    if (*s == '.') {
+    if (!hex && *s == '.') {
         s++;
         while (is_digit(*s)) {
             fdigits[nd] = *s;
@@ -664,7 +708,7 @@ static void float_const(char *s)
             exp10--;
         }
     }
-    if (*s == 'e' || *s == 'E') {
+    if (hex ? *s == 'p' || *s == 'P' : *s == 'e' || *s == 'E') {
         s++;
         esign = 1;
         if (*s == '+') {
@@ -698,11 +742,14 @@ static void float_const(char *s)
     /* an all-ones exponent field is infinity (a decimal never gives NaN) */
     if (tok_type == T_FLOAT) {
         tok_fval.hi = 0;
-        tok_fval.lo = sf32_from_decimal(0, fdigits, nd, exp10);
+        tok_fval.lo = hex ? sf32_from_hex(hi, lo, sticky, exp10) : sf32_from_decimal(0, fdigits, nd, exp10);
         if ((tok_fval.lo & 0x7F800000UL) == 0x7F800000UL)
             warning("floating constant out of range for float (it is infinity)");
     } else {
-        sf64_from_decimal(&tok_fval, 0, fdigits, nd, exp10);
+        if (hex)
+            sf64_from_hex(&tok_fval, hi, lo, sticky, exp10);
+        else
+            sf64_from_decimal(&tok_fval, 0, fdigits, nd, exp10);
         if ((tok_fval.hi & 0x7FF00000UL) == 0x7FF00000UL)
             warning("floating constant out of range for double (it is infinity)");
     }
@@ -711,12 +758,13 @@ static void float_const(char *s)
 }
 
 /* A preprocessing number (C89 3.1.8: digits, letters, '.', and a sign after
- * an e or E) read whole, then taken as an integer or a floating constant.
+ * an e or E, or in the default mode, as C99 has it, a p or P) read whole,
+ * then taken as an integer or a floating constant.
  * dot: the '.' that began it has been read. Reading the whole pp-number
  * first is what C requires: "0x1e+1" is one (invalid) token, not 0x1e + 1,
  * and a bad suffix is reported rather than starting a new token. A '.' or
  * an exponent makes it floating, except in a hexadecimal number, where e
- * is a digit. */
+ * is a digit and a '.' or a p exponent does (C99). */
 static void number(int dot)
 {
     int n;
@@ -729,7 +777,8 @@ static void number(int dot)
         n = 1;
     }
     while (is_digit(ch) || is_alpha(ch) || ch == '.'
-           || ((ch == '+' || ch == '-') && n > 0 && (numbuf[n - 1] == 'e' || numbuf[n - 1] == 'E'))) {
+           || ((ch == '+' || ch == '-') && n > 0 && (numbuf[n - 1] == 'e' || numbuf[n - 1] == 'E'
+                                                    || (!strict && (numbuf[n - 1] == 'p' || numbuf[n - 1] == 'P'))))) {
         if (n >= MAX_NUMBER)
             fatal("a number longer than 509 characters");
         numbuf[n] = ch;
@@ -739,10 +788,15 @@ static void number(int dot)
     numbuf[n] = 0;
     tok = TK_NUM;
     fl = 0;
-    if (!(numbuf[0] == '0' && (numbuf[1] == 'x' || numbuf[1] == 'X')))
+    if (!(numbuf[0] == '0' && (numbuf[1] == 'x' || numbuf[1] == 'X'))) {
         for (i = 0; i < n; i++)
             if (numbuf[i] == '.' || numbuf[i] == 'e' || numbuf[i] == 'E')
                 fl = 1;
+    } else if (!strict) {
+        for (i = 2; i < n; i++)
+            if (numbuf[i] == '.' || numbuf[i] == 'p' || numbuf[i] == 'P')
+                fl = 1;
+    }
     if (fl)
         float_const(numbuf);
     else
@@ -999,6 +1053,12 @@ static void lex(void)
             tok = TK_IDENT;                     /* asm is not a keyword in C89 */
         else if (id[0] == '_' && id[1] == '_')
             gnu_spelling(id);
+        else if (!strict && tok == TK_IDENT && strcmp(id, "restrict") == 0)
+            lex();                              /* C99's restrict: a promise cc1 has no use for */
+        else if (!strict && tok == TK_IDENT && strcmp(id, "inline") == 0)
+            tok = KW_INLINE;
+        else if (!strict && tok == TK_IDENT && strcmp(id, "_Bool") == 0)
+            tok = KW_BOOL;
         return;
     }
     if (is_digit(ch)) {

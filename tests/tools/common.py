@@ -16,12 +16,12 @@ STAGE1 = os.path.join("build", "stage1")              # make stage1: AgDev-built
 AGON = os.path.join("build", "agon")                  # make cross: the compiler as an SD-card tree
 CROSS = os.path.join("build", "cross")                # make cross: the C library's units
 SDCARD = os.path.join("build", "sdcard")              # make sdcard: the bootstrap card
-LIBC = os.path.join(AGON, "lib", "libc.s")
-LIBM = os.path.join(AGON, "lib", "libm.s")    # the floating-point part
-LIBAGON = os.path.join(AGON, "lib", "libagon.s")  # the MOS and VDU interface
+LIBC = os.path.join(AGON, "lib", "agonc", "libc.s")
+LIBM = os.path.join(AGON, "lib", "agonc", "libm.s")    # the floating-point part
+LIBAGON = os.path.join(AGON, "lib", "agonc", "libagon.s")  # the MOS and VDU interface
 LIBAGON_UNITS = ["uart", "vdp", "mosapi", "sysvar", "vdpsys", "vdpbmp", "vdpaudio", "vdpbuf", "vdpmore", "handler"]  # lib/agon/*.c in libagon.s, as the Makefile and bootstrap list them
 RUNTIME = [os.path.join("lib", "rt", "crt0.s"), os.path.join("lib", "rt", "rt.s")]
-INCLUDE = ["-I", os.path.join("lib", "libc"), "-I", "lib"]      # headers as the Agon's /lib and /lib/agon
+INCLUDE = ["-I", os.path.join("lib", "libc"), "-I", "lib"]      # headers as the Agon's /lib/agonc and /lib/agonc/agon
 LIB_SOURCES = [os.path.join("lib", "libc"), os.path.join("lib", "agon")]
 EZ80ASM = os.path.join("third_party", "bin", "ez80asm" + EXE)   # ez80asm built for this computer
 RUN_EMULATOR = os.path.join("tests", "tools", "run_emulator.py")
@@ -72,21 +72,22 @@ def rsp_sources(prog):
 
 def stage_root(dest):
     """A library layout (driver.md section 4) under dest for the host
-    driver's AGONC_ROOT: lib/ (headers, crt0.s, rt.s, libc.s, libm.s, libagon.s), lib/agon/,
-    and empty usrlib/ and tmp/. Rebuilt from scratch."""
+    driver's AGONC_ROOT: lib/agonc/ (headers, crt0.s, rt.s, libc.s, libm.s,
+    libagon.s), lib/agonc/agon/, and empty usrlib/ and tmp/agonc/. Rebuilt
+    from scratch."""
     dest = os.path.join(REPO, dest)
     if os.path.isdir(dest):
         shutil.rmtree(dest)
-    for d in ("lib/agon", "usrlib", "tmp"):
+    for d in ("lib/agonc/agon", "usrlib", "tmp/agonc"):
         os.makedirs(os.path.join(dest, d))
     for f in os.listdir(os.path.join(REPO, "lib", "libc")):
         if f.endswith(".h"):
-            shutil.copy(os.path.join(REPO, "lib", "libc", f), os.path.join(dest, "lib"))
+            shutil.copy(os.path.join(REPO, "lib", "libc", f), os.path.join(dest, "lib", "agonc"))
     for f in os.listdir(os.path.join(REPO, "lib", "agon")):
         if f.endswith(".h"):
-            shutil.copy(os.path.join(REPO, "lib", "agon", f), os.path.join(dest, "lib", "agon"))
+            shutil.copy(os.path.join(REPO, "lib", "agon", f), os.path.join(dest, "lib", "agonc", "agon"))
     for f in RUNTIME + [LIBC, LIBM, LIBAGON]:
-        shutil.copy(os.path.join(REPO, f), os.path.join(dest, "lib"))
+        shutil.copy(os.path.join(REPO, f), os.path.join(dest, "lib", "agonc"))
 
 
 def host_env(root):

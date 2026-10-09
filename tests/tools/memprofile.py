@@ -76,7 +76,7 @@ def units():
 def profile():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
     stage_root(ROOT)
-    root_lib = ROOT + "/lib"
+    root_lib = ROOT + "/lib/agonc"
     peaks = {}
     s_files = {}
     for prog, src in units():
@@ -185,7 +185,7 @@ def device(rows):
             programs.append(testrun.Program(f"mb{k:02d}", os.path.join(bins, "cc2m.bin"),
                                             ["u.ir", "u.s"], [("u.ir", stem + ".ir")]))
             what[f"mb{k:02d}"] = ("cc2", f"{prog}: {name}.c")
-    root_lib = ROOT + "/lib"
+    root_lib = ROOT + "/lib/agonc"
     for i, prog in enumerate(PROGS):
         files = [("crt0.s", root_lib + "/crt0.s"), ("rt.s", root_lib + "/rt.s"), ("libc.s", root_lib + "/libc.s")]
         units_s = []

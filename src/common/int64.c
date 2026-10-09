@@ -4,7 +4,7 @@
  * intermediate result fits the 32 bits an unsigned long has everywhere.
  *
  * The hot functions (add, subtract, compare, the shifts, multiply and the
- * long division) have eZ80 assembly beside their C, chosen by I64_ASM: 1
+ * divisions) have eZ80 assembly beside their C, chosen by I64_ASM: 1
  * where agonc compiles this file (the library's ll.c, and cc1, cpp, cc2
  * and ld themselves from stage 2 on), 0 elsewhere (the PC, AgDev's stage
  * 1). The assembly computes exactly the C's results (a struct i64 is its
@@ -412,97 +412,788 @@ int i64_muladd(struct i64 *r, unsigned int m, unsigned int c)
 
 /* ---- division ---- */
 
-/* Bit by bit, from the top; a 16-bit divisor takes the short road.
+/* Restoring division (long division in base 2): each round shifts the
+ * next dividend bit into the remainder r, and if r >= b, subtracts b and
+ * sets that quotient bit. A divisor of 0 gives a quotient of 0 and a
+ * remainder of a (the C leaves that undefined; ll.c relies on it).
  *
- * This is restoring division (long division in base 2): each round shifts
- * the next dividend bit into the remainder r, and if r >= b, subtracts b
- * and sets that quotient bit. The remainder before a shift is never more
- * than the dividend bits taken so far, so it never loses a bit.
+ * The assembly does the rounds in registers, sized to the operands, and
+ * works in q itself: it copies a there (first moving b to w and reading
+ * it from there, if q is b), finds n and m, the numbers of significant
+ * bytes of a and b, and when n < m (or b is 0) gives a quotient of 0 and
+ * a remainder of a. Otherwise the top m - 1 bytes of a, which are below
+ * b, go straight into r (and are cleared in q), and the rounds run only
+ * over the other n - m + 1 bytes, top first, 8 rounds each, each byte
+ * replaced by the quotient's byte there; the bytes above are a's zeros.
+ * So a dividend's leading zero bytes and the rounds whose quotient bit
+ * must be 0 are never run. The remainder is written last, from r, so q
+ * and rem may each be a or b.
  *
- * The assembly keeps the dividend n in w[0] and r in w[1] and shifts all
- * 16 bytes left together, so n's top bit moves into r's bottom. The bit
- * shifted out of n's bottom is free, so the quotient bit goes there
- * (set 0, (iy+0)), and after 64 rounds w[0] holds the quotient. Each round
- * computes t = r - b into w[3]; no borrow means r >= b, and t replaces r. */
+ * Each width of b has its own loop; IY points at the current byte, k:
+ *   m = 1: r in A, the divisor in E, byte k at the top of HL (a 3-byte
+ *          load from k - 2). add hl,hl moves its top bit through the
+ *          carry into r (rla), and the quotient bit is set in the bottom
+ *          of L (inc l). For b < 128, 2r + 1 fits A; for b >= 128 a carry
+ *          out of rla means 2r + 1 >= 256 > b, so subtract regardless.
+ *   m = 2, 3: r in HL, b in DE, byte k in A. A failed trial subtraction
+ *          is undone by add hl,de, whose carry out is then 1; a good one
+ *          leaves the carry 0. So the carry after a round is the quotient
+ *          bit inverted, and the next rla shifts it into A as the next
+ *          dividend bit leaves: after 8 rounds and one more rla, A holds
+ *          the byte's quotient inverted (cpl). For m = 3, 2r + 1 may pass
+ *          24 bits; the carry out of adc hl,hl then means r > b, and the
+ *          round subtracts without a test (the @b3 entries).
+ *   m = 4: r in A:HL, b in E:BC, byte k in D (rl d), the same way; the
+ *          @b4 entries for a 33-bit 2r + 1.
+ *   m = 5 .. 8: r in HL, HL' and DE' (bits 0-23, 24-47, 48-71; 2r + 1 is
+ *          at most 65 bits), b in BC, BC' and the local d2 (bits 48-63),
+ *          byte k in A; the rounds in a loop counted by D.
+ * The bytes are counted by B (m <= 3), B' (m = 4) or the local cnt. Only
+ * q's own 8 bytes are written; a 3-byte load may read a byte or two below
+ * q. The alternate registers (B' for m = 4; BC', DE' and HL' for m >= 5)
+ * are the ABI's to clobber (abi.md section 4); MOS's interrupt handlers
+ * never touch them, and lib/agon/kbint.s saves them around a C handler.
+ * (No EX AF,AF': its apostrophe, in this C file, upsets gcc -pedantic.) */
 #if I64_ASM
 void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b)
 {
-    struct i64 *p;
-    struct i64 w[4];                    /* n (then q), r, b, t */
+    unsigned char *p;
+    int cnt;
+    int d2;
+    unsigned char w[8];                 /* b, if q is b */
 
-    if (b->hi == 0 && b->lo <= 0xFFFF) {
-        i64_set(rem, 0, i64_divsmall(q, a, (unsigned int)b->lo));
-        return;
-    }
     p = w;
-    w[0] = *a;
-    w[1].hi = 0;
-    w[1].lo = 0;
-    w[2] = *b;
 #asm
-        ld      iy, (ix-3)
-        ld      b, 64
-@loop:
-        sla     (iy+0)
-        rl      (iy+1)
-        rl      (iy+2)
-        rl      (iy+3)
-        rl      (iy+4)
-        rl      (iy+5)
-        rl      (iy+6)
-        rl      (iy+7)
-        rl      (iy+8)
-        rl      (iy+9)
-        rl      (iy+10)
-        rl      (iy+11)
-        rl      (iy+12)
-        rl      (iy+13)
-        rl      (iy+14)
-        rl      (iy+15)
-        ld      a, (iy+8)
-        sub     a, (iy+16)
-        ld      (iy+24), a
-        ld      a, (iy+9)
+        ld      a, (ix+15)
+        cp      a, (ix+6)
+        jr      nz, @nb
+        ld      hl, (ix+15)
+        ld      de, (ix+6)
+        or      a
+        sbc     hl, de
+        jr      nz, @nb
+        ld      hl, (ix+15)
+        ld      de, (ix-3)
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ld      hl, (ix-3)
+        ld      (ix+15), hl
+@nb:
+        ld      hl, (ix+12)
+        ld      de, (ix+6)
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
 #endasm
 #asm
-        sbc     a, (iy+17)
-        ld      (iy+25), a
-        ld      a, (iy+10)
-        sbc     a, (iy+18)
-        ld      (iy+26), a
-        ld      a, (iy+11)
-        sbc     a, (iy+19)
-        ld      (iy+27), a
-        ld      a, (iy+12)
-        sbc     a, (iy+20)
-        ld      (iy+28), a
-        ld      a, (iy+13)
-        sbc     a, (iy+21)
-        ld      (iy+29), a
-        ld      a, (iy+14)
-        sbc     a, (iy+22)
-        ld      (iy+30), a
-        ld      a, (iy+15)
-        sbc     a, (iy+23)
-        ld      (iy+31), a
+        ldi
+        ldi
+        ex      de, hl
+        dec     hl
+        ld      b, 8
+        xor     a
+@sn:
+        cp      a, (hl)
+        jr      nz, @gn
+        dec     hl
+        djnz    @sn
+@gn:
+        ld      iy, (ix+15)
+        ld      a, (iy+7)
+        or      a, (iy+6)
+        or      a, (iy+5)
+        or      a, (iy+4)
+        jp      nz, @m8
+        or      a, (iy+3)
+        jp      nz, @m4
+        or      a, (iy+2)
+        jp      nz, @m3
+        or      a, (iy+1)
+        jp      nz, @m2
+        or      a, (iy+0)
 #endasm
 #asm
-        jr      c, @less
-        ld      hl, (iy+24)
-        ld      (iy+8), hl
-        ld      hl, (iy+27)
-        ld      (iy+11), hl
-        ld      a, (iy+30)
-        ld      (iy+14), a
-        ld      a, (iy+31)
-        ld      (iy+15), a
-        set     0, (iy+0)
-@less:
+        jr      z, @zero
+        ld      e, a
+        ld      a, b
+        or      a
+        jr      z, @zero
+        ld      bc, 0
+        ld      c, a
+        ld      iy, (ix+6)
+        add     iy, bc
+        dec     iy
+        ld      b, a
+        xor     a
+        bit     7, e
+        jr      nz, @f1
+        jr      @l1
+@zero:
+        ld      hl, (ix+6)
+        ld      de, (ix+9)
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ld      iy, (ix+6)
+        ld      hl, 0
+#endasm
+#asm
+        ld      (iy+0), hl
+        ld      (iy+3), hl
+        ld      (iy+5), hl
+        jp      @end
+@l1:
+        ld      hl, (iy-2)
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+#endasm
+#asm
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+#endasm
+#asm
+        inc     l
+        ld      (iy+0), l
+        dec     iy
+        djnz    @l1
+        jr      @r1
+@f1:
+        ld      hl, (iy-2)
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+#endasm
+#asm
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+#endasm
+#asm
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        add     hl, hl
+        rla
+        jr      c, $+5
+        cp      a, e
+        jr      c, $+4
+        sub     a, e
+        inc     l
+        ld      (iy+0), l
+        dec     iy
+        djnz    @f1
+@r1:
+        ld      hl, 0
+        ld      l, a
+        ld      iy, (ix+9)
+        ld      (iy+0), hl
+        ld      l, h
+        ld      (iy+3), hl
+        ld      (iy+5), hl
+        jp      @end
+@m2:
+        ld      a, b
+        sub     a, 2
+        jp      c, @zero
+#endasm
+#asm
+        ld      de, (iy+0)
+        ld      bc, 0
+        ld      c, a
+        ld      iy, (ix+6)
+        add     iy, bc
+        ld      hl, 0
+        ld      l, (iy+1)
+        ld      (iy+1), b
+        ld      b, a
+        inc     b
+        ld      a, (iy+0)
+@l2:
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+#endasm
+#asm
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+        jr      nc, $+3
+        add     hl, de
+        rla
+        adc     hl, hl
+        sbc     hl, de
+#endasm
+#asm
+        jr      nc, $+3
+        add     hl, de
+        rla
+        cpl
+        ld      (iy+0), a
+        dec     iy
+        ld      a, (iy+0)
+        djnz    @l2
+        jp      @r3
+@m3:
+        ld      a, b
+        sub     a, 3
+        jp      c, @zero
+        ld      de, (iy+0)
+        ld      bc, 0
+        ld      c, a
+        ld      iy, (ix+6)
+        add     iy, bc
+        ld      hl, 0
+        ld      l, (iy+1)
+        ld      h, (iy+2)
+        ld      (iy+1), b
+        ld      (iy+2), b
+        ld      b, a
+        inc     b
+#endasm
+#asm
+        ld      a, (iy+0)
+@l3:
+        rla
+        adc     hl, hl
+        jr      c, @b30
+        sbc     hl, de
+        jr      nc, @n30
+        add     hl, de
+@n30:
+        rla
+        adc     hl, hl
+        jr      c, @b31
+        sbc     hl, de
+        jr      nc, @n31
+        add     hl, de
+@n31:
+        rla
+        adc     hl, hl
+        jr      c, @b32
+        sbc     hl, de
+        jr      nc, @n32
+        add     hl, de
+@n32:
+        rla
+        adc     hl, hl
+        jr      c, @b33
+        sbc     hl, de
+#endasm
+#asm
+        jr      nc, @n33
+        add     hl, de
+@n33:
+        rla
+        adc     hl, hl
+        jr      c, @b34
+        sbc     hl, de
+        jr      nc, @n34
+        add     hl, de
+@n34:
+        rla
+        adc     hl, hl
+        jr      c, @b35
+        sbc     hl, de
+        jr      nc, @n35
+        add     hl, de
+@n35:
+        rla
+        adc     hl, hl
+        jr      c, @b36
+        sbc     hl, de
+        jr      nc, @n36
+        add     hl, de
+@n36:
+        rla
+        adc     hl, hl
+        jr      c, @b37
+#endasm
+#asm
+        sbc     hl, de
+        jr      nc, @n37
+        add     hl, de
+@n37:
+        rla
+        cpl
+        ld      (iy+0), a
+        dec     iy
+        ld      a, (iy+0)
+        djnz    @l3
+        jr      @r3
+@b30:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n30
+@b31:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n31
+@b32:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n32
+@b33:
+        or      a
+        sbc     hl, de
+        or      a
+#endasm
+#asm
+        jr      @n33
+@b34:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n34
+@b35:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n35
+@b36:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n36
+@b37:
+        or      a
+        sbc     hl, de
+        or      a
+        jr      @n37
+@r3:
+        ld      iy, (ix+9)
+        ld      (iy+0), hl
+        ld      hl, 0
+        ld      (iy+3), hl
+        ld      (iy+5), hl
+        jp      @end
+@m4:
+#endasm
+#asm
+        ld      a, b
+        sub     a, 4
+        jp      c, @zero
+        ld      de, 0
+        ld      e, a
+        inc     a
+        exx
+        ld      b, a
+        exx
+        ld      bc, (iy+0)
+        ld      a, (iy+3)
+        ld      iy, (ix+6)
+        add     iy, de
+        ld      e, a
+        ld      hl, (iy+1)
+        ld      (iy+1), d
+        ld      (iy+2), d
+        ld      (iy+3), d
+        xor     a
+        ld      d, (iy+0)
+        jr      @l4
+@b40:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+#endasm
+#asm
+        or      a
+        jr      @n40
+@b41:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n41
+@b42:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n42
+@b43:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n43
+@l4:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b40
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n40
+        add     hl, bc
+#endasm
+#asm
+        adc     a, e
+@n40:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b41
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n41
+        add     hl, bc
+        adc     a, e
+@n41:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b42
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n42
+        add     hl, bc
+        adc     a, e
+@n42:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b43
+        sbc     hl, bc
+        sbc     a, e
+#endasm
+#asm
+        jr      nc, @n43
+        add     hl, bc
+        adc     a, e
+@n43:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b44
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n44
+        add     hl, bc
+        adc     a, e
+@n44:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b45
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n45
+        add     hl, bc
+        adc     a, e
+@n45:
+        rl      d
+        adc     hl, hl
+        rla
+#endasm
+#asm
+        jr      c, @b46
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n46
+        add     hl, bc
+        adc     a, e
+@n46:
+        rl      d
+        adc     hl, hl
+        rla
+        jr      c, @b47
+        sbc     hl, bc
+        sbc     a, e
+        jr      nc, @n47
+        add     hl, bc
+        adc     a, e
+@n47:
+        rl      d
+        push    af
+        ld      a, d
+        cpl
+        ld      (iy+0), a
+        dec     iy
+        ld      d, (iy+0)
+        pop     af
+        exx
         dec     b
-        jp      nz, @loop
 #endasm
-    *q = w[0];
-    *rem = w[1];
+#asm
+        exx
+        jp      nz, @l4
+        jr      @r4
+@b44:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n44
+@b45:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n45
+@b46:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n46
+@b47:
+        or      a
+        sbc     hl, bc
+        sbc     a, e
+        or      a
+        jr      @n47
+@r4:
+        ld      iy, (ix+9)
+#endasm
+#asm
+        ld      (iy+0), hl
+        ld      (iy+3), a
+        ld      hl, 0
+        ld      (iy+4), hl
+        ld      (iy+5), hl
+        jp      @end
+@m8:
+        ld      c, 8
+        ld      a, (iy+7)
+        or      a
+        jr      nz, @g8
+        dec     c
+        or      a, (iy+6)
+        jr      nz, @g8
+        dec     c
+        or      a, (iy+5)
+        jr      nz, @g8
+        dec     c
+@g8:
+        ld      a, b
+        sub     a, c
+        jp      c, @zero
+        ld      de, 0
+        ld      e, a
+        inc     a
+#endasm
+#asm
+        ld      (ix-6), a
+        ld      hl, 0
+        ld      l, (iy+6)
+        ld      h, (iy+7)
+        ld      (ix-9), hl
+        ld      a, c
+        ld      bc, (iy+3)
+        push    bc
+        ld      bc, (iy+0)
+        ld      iy, (ix+6)
+        add     iy, de
+        ld      hl, (iy+1)
+        ld      (iy+1), d
+        ld      (iy+2), d
+        ld      (iy+3), d
+        exx
+        pop     bc
+        ld      de, 0
+        cp      a, 7
+        jr      nc, @w7
+        ld      hl, 0
+        ld      l, (iy+4)
+#endasm
+#asm
+        ld      (iy+4), d
+        cp      a, 6
+        jr      c, @w5
+        ld      h, (iy+5)
+        ld      (iy+5), d
+        jr      @w5
+@w7:
+        ld      hl, (iy+4)
+        ld      (iy+4), de
+        cp      a, 8
+        jr      c, @w5
+        ld      e, (iy+7)
+        ld      (iy+7), d
+@w5:
+        exx
+        ld      a, (iy+0)
+@l8:
+        ld      d, 8
+@k8:
+        rla
+        adc     hl, hl
+        exx
+        adc     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        ex      de, hl
+        exx
+#endasm
+#asm
+        sbc     hl, bc
+        exx
+        sbc     hl, bc
+        ex      de, hl
+        push    bc
+        ld      bc, (ix-9)
+        sbc     hl, bc
+        pop     bc
+        ex      de, hl
+        jr      nc, @s8
+        exx
+        add     hl, bc
+        exx
+        adc     hl, bc
+        ex      de, hl
+        push    bc
+        ld      bc, (ix-9)
+        adc     hl, bc
+        pop     bc
+        ex      de, hl
+@s8:
+        exx
+        dec     d
+        jr      nz, @k8
+        rla
+        cpl
+        ld      (iy+0), a
+#endasm
+#asm
+        dec     iy
+        ld      a, (iy+0)
+        dec     (ix-6)
+        jp      nz, @l8
+        ld      iy, (ix+9)
+        ld      (iy+0), hl
+        exx
+        ld      (iy+3), hl
+        ld      (iy+6), e
+        ld      (iy+7), d
+@end:
+#endasm
 }
 #else
 void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b)
@@ -512,11 +1203,16 @@ void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct 
     struct i64 qq;
     int i;
 
-    if (b->hi == 0 && b->lo <= 0xFFFF) {
-        i64_set(rem, 0, i64_divsmall(q, a, (unsigned int)b->lo));
+    n = *a;
+    if (b->hi == 0 && b->lo == 0) {
+        *rem = n;                       /* before q, which may be a */
+        i64_set(q, 0, 0);
         return;
     }
-    n = *a;
+    if (b->hi == 0 && b->lo <= 0xFFFF) {
+        i64_set(rem, 0, i64_divsmall(q, &n, (unsigned int)b->lo));
+        return;
+    }
     i64_set(&r, 0, 0);
     i64_set(&qq, 0, 0);
     for (i = 63; i >= 0; i--) {
@@ -536,7 +1232,99 @@ void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct 
 #endif
 
 /* Truncating: the remainder takes the dividend's sign. The magnitudes are
- * divided and the signs fixed afterwards, so a == q * b + rem. */
+ * divided and the signs fixed afterwards, so a == q * b + rem. (The most
+ * negative value is its own negation, which read unsigned is its
+ * magnitude, 2^63.)
+ *
+ * The assembly copies a and b to u, negating each that is negative
+ * (@neg negates the 8 bytes at IY, with sbc from 0: a 3-byte sub, then a
+ * 3-byte and two 1-byte sbc), and keeps in s what is to be done after
+ * i64_divu: bit 0 negate rem (a < 0), bit 1 negate q (the signs differ). */
+#if I64_ASM
+void i64_divs(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b)
+{
+    unsigned char *p;
+    int s;
+    struct i64 u[2];                    /* |a|, |b| */
+
+    p = (unsigned char *)u;
+#asm
+        ld      iy, (ix-3)
+        ld      hl, (ix+12)
+        lea     de, iy+0
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ld      hl, (ix+15)
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ldi
+        ld      c, 0
+        bit     7, (iy+7)
+        jr      z, @ap
+        ld      c, 3
+        call    @neg
+#endasm
+#asm
+@ap:
+        bit     7, (iy+15)
+        jr      z, @bp
+        ld      a, c
+        xor     a, 2
+        ld      c, a
+        lea     iy, iy+8
+        call    @neg
+@bp:
+        ld      (ix-6), c
+        jr      @go
+@neg:
+        ld      hl, 0
+        ld      de, (iy+0)
+        or      a
+        sbc     hl, de
+        ld      (iy+0), hl
+        ld      hl, 0
+        ld      de, (iy+3)
+        sbc     hl, de
+        ld      (iy+3), hl
+#endasm
+#asm
+        ld      a, 0
+        sbc     a, (iy+6)
+        ld      (iy+6), a
+        ld      a, 0
+        sbc     a, (iy+7)
+        ld      (iy+7), a
+        ret
+@go:
+#endasm
+    i64_divu(q, rem, &u[0], &u[1]);
+#asm
+        ld      a, (ix-6)
+        rra
+        jr      nc, @rp
+        ld      iy, (ix+9)
+        call    @neg
+@rp:
+        ld      a, (ix-6)
+        and     a, 2
+        jr      z, @qp
+        ld      iy, (ix+6)
+        call    @neg
+@qp:
+#endasm
+}
+#else
 void i64_divs(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b)
 {
     struct i64 ua;
@@ -558,6 +1346,7 @@ void i64_divs(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct 
     if (na)
         i64_neg(rem, rem);
 }
+#endif
 
 /* ---- the bitwise operations and negate ---- */
 

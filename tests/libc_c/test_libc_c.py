@@ -33,17 +33,27 @@ T4  each test program, through cpp + cc1 + cc2 + ld (crt0.s, rt.s, libc.s),
       t_fpeq    softfp.c's assembly kernels give the C's exact bits: the two
                 builds linked side by side over special and random operands
       t_i64eq   the same for int64.c's (long long) assembly
+      t_streq   the same for string.c's (STR_ASM): the library's build
+                against its C, renamed c_ (streq_c.c)
+      t_intmath 24-, 32- and 64-bit multiply and divide in a vertical-blank
+                C handler while main does them too (no helper's state
+                leaks between them; kbint.s saves the alternate registers)
       t_fpio    printf's e f g E F G (text from Python's formatting, which is
                 C's), '#' on o and x, scanf's floating conversions, strtod and
                 atof (bits from the PC), rounding past 800 digits
       t_llio    long long: printf's and scanf's ll and j, %lln, strtoll,
                 strtoull, atoll, llabs, lldiv, <limits.h> and <stdint.h>
+      t_c99lib  C99's additions: snprintf, vsnprintf, hh z t, %a, v*scanf,
+                hexadecimal, inf and nan in scanf and strtod, strtof,
+                strtold, isblank, va_copy, <stdbool.h>, <inttypes.h>,
+                <iso646.h>; C89's strtod, atof and sscanf without them
 K   t_keyh.c: a C key handler (mos_set_key_handler) sees the keys typed
     ("kq") while main divides alongside it, its quotients right (the
     runtime's cells saved around the handler); interrupt handlers take
     and give back vectors, four slots at most. Guard: "kx" fails check 3.
 I   t_conin.c: a line typed at the keyboard ("Bob") reaches fgets(stdin)
-    exactly, even when stdin's buffer held other bytes; guard: "Bobby"
+    exactly, even when stdin's buffer held other bytes, and after
+    setbuf(stdin, NULL) too; guard: "Bobby"
     fails check 2.
 X   t_exit.c: exit(0) from ten calls deep returns to MOS, which then runs
     t_after (exit 99); if exit() returned, t_exit would exit 1.
@@ -52,7 +62,8 @@ E   how programs end, in one testrun session (its runtime records each
     the atexit functions in reverse, then closes an unclosed file: 7),
     t_abrt (abort: 134, the file closed unwritten), t_sig (SIGTERM's
     default: 143, the file written), t_exd (exit(3) from deep), t_tmpx (a
-    tmpfile left open), t_args (crt0's quoted arguments), then t_echk
+    tmpfile left open), t_args (crt0's quoted arguments; and 40 of them:
+    32 entries kept, argv[argc] null), then t_echk
     checks the files (the tmpfile's gone) and that all 8 MOS handles are
     free; guard: t_echk expecting the wrong text fails 1.
 C   Ctrl-C, pressed by the harness when each program has made its marker
@@ -64,7 +75,7 @@ C   Ctrl-C, pressed by the harness when each program has made its marker
 G   getenv (t_env.c) on MOS 3.0.2, after the script sets a variable: its
     value, in either case, and NULL for any other name; and on MOS 2.3.3,
     NULL for every name.
-S1  on the emulator, with the headers in /lib and /lib/agon: the AgDev-built
+S1  on the emulator, with the headers in /lib/agonc and /lib/agonc/agon: the AgDev-built
     cpp, cc1 and cc2 compile every library source and t_stdio.c, the
     AgDev-built ld links them, the device's ez80asm assembles, and the
     program passes; every device .s equals the host's.
@@ -80,9 +91,9 @@ TESTS = os.path.join("tests", "libc_c")
 LIB_DIRS = [os.path.join("lib", "libc"), os.path.join("lib", "agon")]
 INCLUDE = ["-I", os.path.join("lib", "libc"), "-I", os.path.join("lib")]
 RUNTIME = [os.path.join("lib", "rt", "crt0.s"), os.path.join("lib", "rt", "rt.s")]
-LIBC = os.path.join("build", "agon", "lib", "libc.s")
-LIBM = os.path.join("build", "agon", "lib", "libm.s")
-LIBAGON = os.path.join("build", "agon", "lib", "libagon.s")
+LIBC = os.path.join("build", "agon", "lib", "agonc", "libc.s")
+LIBM = os.path.join("build", "agon", "lib", "agonc", "libm.s")
+LIBAGON = os.path.join("build", "agon", "lib", "agonc", "libagon.s")
 FIXTURES = [os.path.join(TESTS, "fixtures", f) for f in ("existing.txt", "exact16.bin")]
 
 # (program, one check, the same check made wrong)
@@ -106,6 +117,9 @@ PROGRAMS = [
      "check(bad_shift, 1);                /* (the random operands) */"),
     ("t_fpio", 'check_str(buf, "0.1000000015");', 'check_str(buf, "0.1000000016");'),
     ("t_llio", 'check_str(buf, "123456789abcdef0");', 'check_str(buf, "123456789abcdef1");'),
+    ("t_streq", "check(d_memmove, 0);", "check(d_memmove, 1);"),
+    ("t_intmath", "check(int_bad == 0, 1);", "check(int_bad == 0, 0);"),
+    ("t_c99lib", 'row("0x1.9ap-4", sprintf(buf, "%.2a", 0.1));', 'row("0x1.99p-4", sprintf(buf, "%.2a", 0.1));'),
 ]
 
 # for each program: the wrong check's number, and how many checks run (mod 256)
@@ -113,7 +127,7 @@ EXPECT = {
     "t_libc": (69, 145),
     "t_mos": (54, 81),
     "t_malloc": (9, 44),
-    "t_stdio": (100, 309 % 256),
+    "t_stdio": (102, 311 % 256),
     "t_term": (21, 30),
     "t_stream": (14, 95),
     "t_stdmore": (27, 56),
@@ -127,6 +141,9 @@ EXPECT = {
     "t_i64eq": (6, 6),
     "t_fpio": (202, 276 % 256),
     "t_llio": (12, 108),
+    "t_streq": (9, 9),
+    "t_intmath": (3, 3),
+    "t_c99lib": (58, 182),
 }
 
 
@@ -141,7 +158,8 @@ def o(name):
 # Tests built with more units than their own: the VDU tests compile these
 # lib/agon units in with AGON_VDU_CAPTURE defined, so that the test's own
 # vdu and vdu_n record the bytes; t_fpeq links softfp.c twice, its
-# assembly kernels and its C, under different names.
+# assembly kernels and its C, under different names, and t_streq the
+# library's string.c beside its C.
 def _agon(*units):
     return [os.path.join("lib", "agon", u + ".c") for u in units]
 
@@ -149,7 +167,8 @@ def _agon(*units):
 EXTRA = {"t_vdu": (_agon("vdp", "vdpsys", "vdpbmp"), ["-DAGON_VDU_CAPTURE"]),
          "t_vdu2": (_agon("vdpaudio", "vdpbuf", "vdpmore", "vdpsys"), ["-DAGON_VDU_CAPTURE"]),
          "t_fpeq": ([os.path.join(TESTS, "fpeq_a.c"), os.path.join(TESTS, "fpeq_c.c")], []),
-         "t_i64eq": ([os.path.join(TESTS, "i64eq_a.c"), os.path.join(TESTS, "i64eq_c.c")], [])}
+         "t_i64eq": ([os.path.join(TESTS, "i64eq_a.c"), os.path.join(TESTS, "i64eq_c.c")], []),
+         "t_streq": ([os.path.join(TESTS, "streq_c.c")], [])}
 
 
 def build(src, stem):
@@ -262,6 +281,9 @@ def conin():
     rc = emulate(["t_conin"], ["t_conin"], "libcc", ["Bob"])
     if rc != 0:
         problems.append(f"typed Bob: check {rc} failed")
+    rc = emulate(["t_conin"], ["t_conin unbuf"], "libcc", ["Bob"])
+    if rc != 0:
+        problems.append(f"setbuf(stdin, NULL), typed Bob: check {rc} failed")
     rc = emulate(["t_conin"], ["t_conin"], "libcc", ["Bobby"])
     if rc != 2:
         problems.append(f"guard: typed Bobby gave {rc}, expected 2")
@@ -283,11 +305,15 @@ def ending():
     rt = testrun.runtime()
     runs = [("t_atx", "t_atx", ()), ("t_abrt", "t_abrt", ()), ("t_sig", "t_sig", ()), ("t_exd", "t_exd", ()),
             ("t_tmpx", "t_tmpx", ()),
-            ("t_args", "t_args", ('"a b"', "c", '""', 'x"y"', '"d e')), ("t_echk", "t_echk", ()),
+            ("t_args", "t_args", ('"a b"', "c", '""', 'x"y"', '"d e')),
+            ("t_argsm", "t_args", tuple(str(i) for i in range(1, 41))), ("t_echk", "t_echk", ()),
             ("t_echkb", "t_echk", ("bad",))]
     want = {"t_atx": (7, b"main\ntwo\none\n"), "t_abrt": (134, b""), "t_sig": (143, b""), "t_exd": (3, b""),
             "t_tmpx": (0, b""),
-            "t_args": (0, b'6\n[a b]\n[c]\n[]\n[x"y"]\n[d e]\n'), "t_echk": (0, b""), "t_echkb": (1, b"")}
+            "t_args": (0, b'6\n[a b]\n[c]\n[]\n[x"y"]\n[d e]\nend\n'),
+            # 32 entries at most: argv[0], the test runtime's output file, and 1 to 30
+            "t_argsm": (0, b"31\n" + b"".join(b"[%d]\n" % i for i in range(1, 31)) + b"end\n"),
+            "t_echk": (0, b""), "t_echkb": (1, b"")}
     programs = []
     for name, src, args in runs:
         if name == src:
@@ -363,7 +389,7 @@ def handles():
         args += ["--bin", os.path.join("build", "stage1", b + ".bin")]
     for f in FIXTURES + RUNTIME + [LIBC, os.path.join(TESTS, "t_after.c")]:
         args += ["--file", f]
-    args += ["--file-at", "lib/agon/mos.h=" + os.path.join("lib", "agon", "mos.h")]
+    args += ["--file-at", "lib/agonc/agon/mos.h=" + os.path.join("lib", "agon", "mos.h")]
     for i in range(9):
         args += ["--cmd", f"cpp t_after.c /a{i}.i", "--cmd", f"cc1 /a{i}.i /a{i}.ir -u t_after.c",
                  "--cmd", f"cc2 /a{i}.ir /a{i}.s", "--cmd", f"ld -o /a{i}.asm crt0.s rt.s libc.s /a{i}.s"]
@@ -392,7 +418,7 @@ def s1():
                 units.append(d.replace(os.sep, "/") + "/" + f)
                 files += ["--file-at", units[-1] + "=" + os.path.join(d, f)]
             elif f.endswith(".h"):
-                dest = "lib/agon/" + f if d.endswith("agon") else "lib/" + f
+                dest = "lib/agonc/agon/" + f if d.endswith("agon") else "lib/agonc/" + f
                 files += ["--file-at", dest + "=" + os.path.join(d, f)]
     for f in RUNTIME + FIXTURES + [os.path.join(TESTS, "t_stdio.c"), os.path.join(TESTS, "check.h")]:
         files += ["--file", f]
@@ -425,8 +451,8 @@ def s1():
 
 def main():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
-    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "libc.s")):
-        print("build/agon/lib/libc.s is missing: run make cross first")
+    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "agonc", "libc.s")):
+        print("build/agon/lib/agonc/libc.s is missing: run make cross first")
         return 1
     cases = [("T4 t_libc, t_mos, t_malloc, t_stdio on the emulator + guards", t4),
              ("I  console input: a typed line reaches fgets(stdin)", conin),
@@ -437,7 +463,7 @@ def main():
              ("G  getenv on MOS 3.0.2 (a variable set by the script) and on MOS 2.3.3", environment)]
     if "--no-stage1" not in sys.argv:
         cases.append(("H  36 AgDev pass runs in one session leave all 8 MOS file handles free", handles))
-        cases.append(("S1 the library and t_stdio built on the emulator (headers in /lib), and run", s1))
+        cases.append(("S1 the library and t_stdio built on the emulator (headers in /lib/agonc), and run", s1))
     failed = 0
     for name, fn in cases:
         problems = fn()

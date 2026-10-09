@@ -1,7 +1,8 @@
 /* string.c - <string.h>. size_t is unsigned int, so the functions written
  * with unsigned are the prototypes' size_t ones.
  *
- * Every function is a plain loop over bytes in portable C. Comparisons
+ * Every function is a loop over bytes in portable C; the busiest also
+ * have eZ80 assembly beside it (STR_ASM, below). Comparisons
  * (strcmp, strncmp, memcmp) compare bytes as unsigned char, as C89 4.11.4
  * requires, so a byte above 0x7F sorts after every ASCII one even though
  * char is signed. strtok keeps its place in a static, so only one string
@@ -10,6 +11,40 @@
 #include <string.h>
 #include <errno.h>
 
+/* STR_ASM: eZ80 assembly beside the C for the busiest functions (1, under
+ * agonc), or the C alone (0). The assembly uses the block instructions:
+ * CPIR finds a byte (strlen, memchr, strcpy's length), LDIR and LDDR copy
+ * (memcpy, memmove, memset, strcpy). Each block finds its parameters at
+ * (ix+6), (ix+9), (ix+12) and leaves its result in the first local,
+ * (ix-3), which the C returns (abi.md 10). A count of zero is tested
+ * first everywhere: CPIR and LDIR with BC = 0 would run 2^24 times. */
+#ifndef STR_ASM
+#ifdef __AGONC__
+#define STR_ASM 1
+#else
+#define STR_ASM 0
+#endif
+#endif
+
+#if STR_ASM
+/* CPIR from BC = 0 counts down past the NUL: the length is -BC - 1. */
+unsigned strlen(const char *s)
+{
+    unsigned n;
+
+#asm
+        ld      hl, (ix+6)
+        ld      bc, 0
+        xor     a
+        cpir
+        ld      hl, 0
+        scf
+        sbc     hl, bc
+        ld      (ix-3), hl
+#endasm
+    return n;
+}
+#else
 unsigned strlen(const char *s)
 {
     const char *p;
@@ -19,9 +54,43 @@ unsigned strlen(const char *s)
         p++;
     return p - s;
 }
+#endif
 
 /* Stops at the first difference or at a's end; b's end is then a
  * difference too, unless a ended at the same place. */
+#if STR_ASM
+/* DE = a, HL = b. At a difference, `sub (hl)` leaves the low byte of
+ * *a - *b and the borrow, and `sbc hl,hl` / `ld l,a` widens it to the
+ * int the C gives. */
+int strcmp(const char *a, const char *b)
+{
+    int r;
+
+#asm
+        ld      de, (ix+6)
+        ld      hl, (ix+9)
+@loop:
+        ld      a, (de)
+        cp      (hl)
+        jr      nz, @diff
+        or      a
+        jr      z, @same
+        inc     de
+        inc     hl
+        jr      @loop
+@diff:
+        sub     (hl)
+        sbc     hl, hl
+        ld      l, a
+        jr      @out
+@same:
+        ld      hl, 0
+@out:
+        ld      (ix-3), hl
+#endasm
+    return r;
+}
+#else
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b) {
@@ -30,6 +99,7 @@ int strcmp(const char *a, const char *b)
     }
     return (unsigned char)*a - (unsigned char)*b;
 }
+#endif
 
 int strncmp(const char *a, const char *b, unsigned n)
 {
@@ -43,6 +113,31 @@ int strncmp(const char *a, const char *b, unsigned n)
     return 0;
 }
 
+#if STR_ASM
+/* CPIR measures s with its NUL (-BC from BC = 0), then LDIR copies it. */
+char *strcpy(char *d, const char *s)
+{
+    char *r;
+
+#asm
+        ld      hl, (ix+6)
+        ld      (ix-3), hl
+        ld      hl, (ix+9)
+        ld      bc, 0
+        xor     a
+        cpir
+        ld      hl, 0
+        or      a
+        sbc     hl, bc
+        push    hl
+        pop     bc
+        ld      hl, (ix+9)
+        ld      de, (ix+6)
+        ldir
+#endasm
+    return r;
+}
+#else
 char *strcpy(char *d, const char *s)
 {
     char *r;
@@ -52,6 +147,7 @@ char *strcpy(char *d, const char *s)
         ;
     return r;
 }
+#endif
 
 /* Copies at most n characters and pads with NULs to n, as C89 requires;
  * no NUL is added if s is n characters or longer. */
@@ -71,6 +167,13 @@ char *strncpy(char *d, const char *s, unsigned n)
     return r;
 }
 
+#if STR_ASM
+char *strcat(char *d, const char *s)
+{
+    strcpy(d + strlen(d), s);
+    return d;
+}
+#else
 char *strcat(char *d, const char *s)
 {
     char *r;
@@ -82,8 +185,33 @@ char *strcat(char *d, const char *s)
         ;
     return r;
 }
+#endif
 
 /* The terminating NUL counts as part of the string (strchr(s, 0) finds it). */
+#if STR_ASM
+char *strchr(const char *s, int c)
+{
+    char *r;
+
+#asm
+        ld      hl, (ix+6)
+        ld      c, (ix+9)
+@loop:
+        ld      a, (hl)
+        cp      c
+        jr      z, @found
+        or      a
+        jr      z, @none
+        inc     hl
+        jr      @loop
+@none:
+        ld      hl, 0
+@found:
+        ld      (ix-3), hl
+#endasm
+    return r;
+}
+#else
 char *strchr(const char *s, int c)
 {
     for (;;) {
@@ -94,6 +222,7 @@ char *strchr(const char *s, int c)
         s++;
     }
 }
+#endif
 
 char *strrchr(const char *s, int c)
 {
@@ -109,6 +238,23 @@ char *strrchr(const char *s, int c)
     }
 }
 
+#if STR_ASM
+void *memcpy(void *d, const void *s, unsigned n)
+{
+#asm
+        ld      bc, (ix+12)
+        ld      hl, 0
+        or      a
+        sbc     hl, bc
+        jr      z, @done
+        ld      de, (ix+6)
+        ld      hl, (ix+9)
+        ldir
+@done:
+#endasm
+    return d;
+}
+#else
 void *memcpy(void *d, const void *s, unsigned n)
 {
     char *dp;
@@ -122,10 +268,53 @@ void *memcpy(void *d, const void *s, unsigned n)
     }
     return d;
 }
+#endif
 
 /* Overlap-safe: copies backward when the destination starts inside the
  * source, so each byte is read before the copy overwrites it; forward
  * otherwise, as memcpy does. */
+#if STR_ASM
+/* Forward with LDIR unless d starts inside s's n bytes (s < d < s + n),
+ * then backward with LDDR from the last bytes. */
+void *memmove(void *d, const void *s, unsigned n)
+{
+#asm
+        ld      bc, (ix+12)
+        ld      hl, 0
+        or      a
+        sbc     hl, bc
+        jr      z, @done
+        ld      hl, (ix+6)
+        ld      de, (ix+9)
+        or      a
+        sbc     hl, de
+        jr      z, @done
+        jr      c, @fwd
+        or      a
+        sbc     hl, bc
+        jr      nc, @fwd
+#endasm
+#asm
+        ld      hl, (ix+9)
+        add     hl, bc
+        dec     hl
+        push    hl
+        ld      hl, (ix+6)
+        add     hl, bc
+        dec     hl
+        ex      de, hl
+        pop     hl
+        lddr
+        jr      @done
+@fwd:
+        ld      de, (ix+6)
+        ld      hl, (ix+9)
+        ldir
+@done:
+#endasm
+    return d;
+}
+#else
 void *memmove(void *d, const void *s, unsigned n)
 {
     char *dp;
@@ -148,7 +337,37 @@ void *memmove(void *d, const void *s, unsigned n)
     }
     return d;
 }
+#endif
 
+#if STR_ASM
+/* The first byte stored, then LDIR copies each byte to the next. */
+void *memset(void *d, int c, unsigned n)
+{
+#asm
+        ld      bc, (ix+12)
+        ld      hl, 0
+        or      a
+        sbc     hl, bc
+        jr      z, @done
+        ld      hl, (ix+6)
+        ld      a, (ix+9)
+        ld      (hl), a
+        dec     bc
+        ld      de, 0
+        ex      de, hl
+        or      a
+        sbc     hl, bc
+        jr      z, @done
+        ex      de, hl
+        push    hl
+        pop     de
+        inc     de
+        ldir
+@done:
+#endasm
+    return d;
+}
+#else
 void *memset(void *d, int c, unsigned n)
 {
     char *p;
@@ -160,6 +379,7 @@ void *memset(void *d, int c, unsigned n)
     }
     return d;
 }
+#endif
 
 int memcmp(const void *a, const void *b, unsigned n)
 {
@@ -178,6 +398,32 @@ int memcmp(const void *a, const void *b, unsigned n)
     return 0;
 }
 
+#if STR_ASM
+/* CPIR stops just past a match (Z set) or when BC runs out. */
+void *memchr(const void *s, int c, size_t n)
+{
+    void *r;
+
+#asm
+        ld      bc, (ix+12)
+        ld      hl, 0
+        or      a
+        sbc     hl, bc
+        jr      z, @none
+        ld      hl, (ix+6)
+        ld      a, (ix+9)
+        cpir
+        jr      nz, @none
+        dec     hl
+        jr      @out
+@none:
+        ld      hl, 0
+@out:
+        ld      (ix-3), hl
+#endasm
+    return r;
+}
+#else
 void *memchr(const void *s, int c, size_t n)
 {
     const unsigned char *p;
@@ -191,6 +437,7 @@ void *memchr(const void *s, int c, size_t n)
     }
     return NULL;
 }
+#endif
 
 /* At most n characters of s after d's, then always a NUL (unlike strncpy). */
 char *strncat(char *d, const char *s, size_t n)

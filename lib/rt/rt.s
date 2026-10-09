@@ -31,16 +31,20 @@
 ;                  of their own, set out where they start)
 ;   other:         __callhl, setjmp, longjmp
 ;
-; Scratch cells: the 24-bit helpers keep working values in fixed bss
-; cells (__imul_buf, __idivu_buf, ...), one set per helper. A cell is
-; shared by every call of its helper, so a helper is not reentrant, and
-; a value must be read out of a cell before anything else that uses the
-; cell runs (each helper below notes where). An interrupt handler written
-; in C may itself multiply or shift while the main program is inside one
-; of these helpers, so lib/agon/kbint.s's __handler_call saves and
-; restores every one of these cells around the handler: a cell added
-; here must be added there too. The 32-bit helpers take their scratch
-; from the stack instead and need none of this.
+; Scratch cells: the 24-bit shifts and sign extensions keep working
+; values in fixed bss cells (__ishru_buf, ...), one set per helper (__imul
+; and the divide helpers have none: they work in registers and on the
+; stack). A cell is shared by every call of its helper, so a helper is
+; not reentrant, and a value must be read out of a cell before anything
+; else that uses the cell runs (each helper below notes where). An
+; interrupt handler written in C may itself shift while the main program
+; is inside one of these helpers, so lib/agon/kbint.s's __handler_call
+; saves and restores every one of these cells around the handler: a cell
+; added here must be added there too. The 32-bit helpers take their
+; scratch from the stack instead and need none of this.
+;
+; The C of the multiply and divide helpers, by the same steps, is
+; lib/rt/rt_ref.c; tests/rt/test_rt.py checks the helpers against it.
 ;
 ; The `;;` lines are directives to ld, never comments
 ; (docs/object_format.md): `;;sect` opens a section (a bss one with its
@@ -48,8 +52,9 @@
 ;
 ; Register-invariant discipline (abi.md section 3) applies throughout:
 ; every 24-bit value this file builds either comes from a full-width
-; immediate/memory load, or is built byte-by-byte through a 3-byte memory
-; scratch cell and reloaded whole - never assembled by writing only H/L
+; immediate/memory load or pop (or whole out of MLT), or is built
+; byte-by-byte through a 3-byte memory or stack scratch cell and reloaded
+; whole - never assembled by writing only H/L
 ; and leaving the inaccessible top byte (HLU/DEU/BCU) stale. The upper
 ; byte is reachable only through a 24-bit load, store, push or pop, or an
 ; instruction that writes the whole register (MLT, for one, zeroes it).
@@ -66,372 +71,583 @@
 ; serves both - there is no separate signed/unsigned __imul, matching the
 ; ABI's helper list.
 ;
-; Uses the eZ80's hardware MLT (unsigned 8x8->16 multiply) via six partial
-; byte products, schoolbook-style, rather than a 24-iteration shift-add
-; loop: six multiplies and their carry chains in place of 24 rounds of
-; shift, test and add.
-;
 ; Let DE = a2:a1:a0 (a0 = E, the lowest byte; a2 = DEU, the ADL upper
-; byte) and HL = b2:b1:b0 likewise. The full product's bit 0-23 depend
-; only on the six terms a_i*b_j with i+j <= 2 (every term with i+j >= 3
-; is weighted by 256^3 or more, a multiple of 2^24, so it contributes
-; exactly 0 to the truncated result and is never computed):
-;   (0,0), (0,1), (1,0)              - both bytes of the 16-bit product matter
-;   (0,2), (1,1), (2,0)              - only the LOW byte matters (the high
-;                                       byte would land at bit 24+)
-; Each product is added into a 3-byte accumulator at its byte offset
-; (i+j) via ordinary ADD/ADC carry chains - plain 8-bit arithmetic, no
-; shifting required, since MLT already delivers each partial product at
-; bit-position 0 and the byte OFFSET (not a bit shift) places it. Carry
-; beyond the accumulator's byte 2 is simply left unstored, which is
-; exactly the mod-2^24 truncation we want.
+; byte) and HL = b2:b1:b0 likewise. The full product's bits 0-23 depend
+; only on the six byte products a_i*b_j with i+j <= 2 (every term with
+; i+j >= 3 is weighted by 256^3 or more, a multiple of 2^24):
 ;
-; MLT's exact behaviour was verified by a probe, not assumed: `mlt rr`
-; computes the 8x8 product of that pair's two low bytes into its low 16
-; bits and CLEARS the pair's ADL upper byte to exactly 0 (not left stale);
-; it does not affect flags; BC/DE/HL all behave identically.
+;   a*b mod 2^24 = P00 + 256*X + 65536*S
+;     P00 = a0*b0                   both bytes matter
+;     X   = a0*b1 + a1*b0           only its low 16 bits matter
+;     S   = a0*b2 + a1*b1 + a2*b0   only its low 8 bits matter
 ;
-; The operand bytes are reached through the bss cell __imul_buf, since a
-; register's upper byte (a2, b2) can only be read by storing the whole
-; register. The right operand (HL) is stored first, because the copy of
-; DE goes through HL. The accumulator is the cell __imul_res, read back
-; whole at the end. Both cells are this helper's alone, but shared by
-; every call of it (see the header on reentrancy).
+; Each byte product is one eZ80 MLT (`mlt rr`: rr's two low bytes
+; multiplied, 8x8 -> 16, into the whole of rr; its upper byte is cleared
+; to 0 and no flag changes - verified by a probe). Everything stays in
+; registers: S is summed in A (8-bit adds, so its carries out of bit 7,
+; worth 2^24, fall away by themselves); X is one `add hl,bc` of two MLT
+; results; and the three parts are combined in HL as
+;   HL = ((X + 256*S) << 8) + P00
+; with S added into H, eight `add hl,hl` for the shift (whatever was in
+; HLU and the carry above it is shifted out past bit 23) and P00 added
+; last from DE.
+;
+; The upper bytes a2 and b2 are the only awkward part: no instruction
+; reads a register's upper byte, so both operands are pushed and their
+; bytes popped back two pairs at a time, from where the pushes leave them:
+;
+;   dec sp, dec sp, push hl, push de   (S = SP on entry)
+;     S-8 S-7 S-6 S-5 S-4 S-3 S-2 S-1
+;      a0  a1  a2  b0  b1  b2   ?   ?
+;   inc sp, inc sp: SP = S-6, and `pop bc` gives C = a2, B = b0, ready
+;   for a2*b0; SP = S-3, and `pop bc` gives C = b2 (B is replaced by a0
+;   from E before a0*b2). SP is then back at S.
+;
+; The two bytes skipped by `dec sp` are never read; BCU after each pop is
+; whatever byte came with it, but MLT replaces all of BC. SP never rises
+; above S (the return address) and every byte is read before SP passes
+; above it, so an interrupt at any point lands below everything live: no
+; scratch cell is used, and __imul is reentrant (lib/agon/kbint.s has no
+; cell of it to save).
+;
+; Register-invariant discipline: B, C, D and H are written alone only to
+; feed an MLT, which rewrites the whole pair; BC, DE and HL come out of
+; MLT with upper bytes 0, so `add hl,bc`, the shifts and the final
+; `add hl,de` act on full, well-defined 24-bit values, and the one other
+; partial write (`ld h,a`) is to an HL whose upper byte `add hl,bc` has
+; just set (and which the shifts then discard).
 ; ===========================================================================
-;;sect bss __imul_buf g 6                ; a0,a1,a2,b0,b1,b2
-;;sect bss __imul_res g 3
 ;;sect code __imul g
-;;ref __imul_buf
-;;ref __imul_res
 __imul:
-        ld      (__imul_buf+3), hl      ; buf[3..5] = b0,b1,b2 (L,H,HLU);
-                                         ; hl only read here, not yet clobbered
-        push    de
-        pop     hl                      ; hl = de (copy; full 24-bit)
-        ld      (__imul_buf+0), hl      ; buf[0..2] = a0,a1,a2 (E,D,DEU)
-
-        ld      hl, 0
-        ld      (__imul_res), hl        ; hl low 16 + the ld below clear all 3
-        xor     a
-        ld      (__imul_res+2), a
-
-        ; P00 = a0*b0, offset 0: both bytes of the 16-bit product matter.
-        ; Each product below has the same shape: B = a_i, C = b_j, then
-        ; `mlt bc` leaves BC = a_i*b_j; C is added into the result byte at
-        ; offset i+j and B, with the carry, into the byte above it (at
-        ; offset 2 only C is added: B would land at bit 24).
-        ld      a, (__imul_buf+0)
-        ld      b, a
-        ld      a, (__imul_buf+3)
-        ld      c, a
+        dec     sp
+        dec     sp                      ; room so b2 can be the low byte of a pop
+        push    hl                      ; S-5..S-3 = b0, b1, b2
+        push    de                      ; S-8..S-6 = a0, a1, a2
+        inc     sp
+        inc     sp                      ; SP = S-6, at a2
+        pop     bc                      ; C = a2, B = b0
         mlt     bc
-        ld      a, (__imul_res+0)
-        add     a, c
-        ld      (__imul_res+0), a
-        ld      a, (__imul_res+1)
-        adc     a, b
-        ld      (__imul_res+1), a
-        ld      a, (__imul_res+2)
-        adc     a, 0                    ; the carry out of byte 1
-        ld      (__imul_res+2), a
-
-        ; P01 = a0*b1, offset 1 (its carry out of byte 2 is bit 24: dropped)
-        ld      a, (__imul_buf+0)
-        ld      b, a
-        ld      a, (__imul_buf+4)
-        ld      c, a
+        ld      a, c                    ; A = low(a2*b0)
+        pop     bc                      ; C = b2; SP = S again
+        ld      b, e                    ; B = a0
         mlt     bc
-        ld      a, (__imul_res+1)
-        add     a, c
-        ld      (__imul_res+1), a
-        ld      a, (__imul_res+2)
-        adc     a, b
-        ld      (__imul_res+2), a
-
-        ; P10 = a1*b0, offset 1
-        ld      a, (__imul_buf+1)
-        ld      b, a
-        ld      a, (__imul_buf+3)
-        ld      c, a
+        add     a, c                    ; + low(a0*b2)
+        ld      b, d
+        ld      c, h
         mlt     bc
-        ld      a, (__imul_res+1)
-        add     a, c
-        ld      (__imul_res+1), a
-        ld      a, (__imul_res+2)
-        adc     a, b
-        ld      (__imul_res+2), a
+        add     a, c                    ; + low(a1*b1): A = S mod 256
 
-        ; P02 = a0*b2, offset 2 - only the low byte of the product matters
-        ld      a, (__imul_buf+0)
-        ld      b, a
-        ld      a, (__imul_buf+5)
-        ld      c, a
-        mlt     bc
-        ld      a, (__imul_res+2)
-        add     a, c
-        ld      (__imul_res+2), a
-
-        ; P11 = a1*b1, offset 2 - low byte only
-        ld      a, (__imul_buf+1)
-        ld      b, a
-        ld      a, (__imul_buf+4)
-        ld      c, a
-        mlt     bc
-        ld      a, (__imul_res+2)
-        add     a, c
-        ld      (__imul_res+2), a
-
-        ; P20 = a2*b0, offset 2 - low byte only
-        ld      a, (__imul_buf+2)
-        ld      b, a
-        ld      a, (__imul_buf+3)
-        ld      c, a
-        mlt     bc
-        ld      a, (__imul_res+2)
-        add     a, c
-        ld      (__imul_res+2), a
-
-        ld      hl, (__imul_res)        ; all 24 bits at once: HLU included
+        ld      b, e
+        ld      c, h
+        mlt     bc                      ; BC = a0*b1
+        ld      h, d                    ; HL = (b2):a1:b0
+        ld      d, l                    ; DE = (a2):b0:a0
+        mlt     hl                      ; HL = a1*b0
+        mlt     de                      ; DE = P00 = a0*b0, DEU = 0
+        add     hl, bc                  ; HL = X (up to 17 bits, HLU = 0 or 1)
+        add     a, h
+        ld      h, a                    ; HL = X + 256*S, mod 2^16 in H:L
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl                  ; HL = (X + 256*S) << 8, mod 2^24
+        add     hl, de                  ; + P00
         ret
 
 ; ===========================================================================
-; __idivu: hl = de / hl  (unsigned, dividend=de, divisor=hl)
+; __idivu: hl = de / hl  (unsigned, dividend = de, divisor = hl), and also
+; de = de % hl. Returning the remainder in DE as well (a register the
+; binary contract lets a helper clobber) is what lets __iremu, __idivs and
+; __irems share this one routine; C code only ever sees HL.
 ;
-; Classic combined-register restoring binary long division. A 6-byte
-; scratch buffer holds Q:R as one logical 48-bit shift register (Q = low 3
-; bytes, initially the dividend, becomes the quotient; R = high 3 bytes,
-; initially 0, becomes the remainder). Each of 24 iterations: shift the
-; whole 48-bit Q:R left by one bit (a 6-byte SLA/RL cascade, since there is
-; no direct 24-bit-pair shift instruction); then if R >= divisor, subtract
-; and set the quotient's new bit (which the shift just set to 0) to 1.
-; Verified by hand with a 4-bit/4-iteration trace of 13/3 = 4 remainder 1.
+; Restoring binary long division, one quotient bit per round, with every
+; working value in registers: no bss cell, so the routine is reentrant and
+; lib/agon/kbint.s has nothing of it to save. Two loops, chosen by the
+; divisor:
 ;
-; Why 24 bits of R are enough: before round k, R holds at most the
-; dividend's top k-1 bits (it is that prefix reduced mod the divisor), so
-; it is below 2^(k-1) and the shift never pushes a bit out of R's top.
-; Division by zero (undefined in C) never borrows, so every quotient bit
-; is 1: the result is 0xFFFFFF, and __iremu's remainder is the dividend.
+;   narrow (divisor 1..127): the remainder fits in A. Each round shifts
+;     the dividend (HL) left with `add hl,hl`, which carries its top bit
+;     into the remainder by `rla`; `cp c` tries the divisor, and when it
+;     fits, `sub c` takes it off and `inc l` sets the quotient bit the shift
+;     has just cleared, so the quotient grows in HL as the dividend leaves
+;     it. 2*remainder+1 <= 253 never overflows A. 7 cycles a round.
+;   wide (divisor 128..0x7FFFFF): the remainder is HL, the divisor BC and
+;     the dividend/quotient DE (shifted through HL by `ex de,hl`). `adc
+;     hl,hl` takes the dividend bit into the remainder; the quotient bit is
+;     set by `inc e` before the trial `sbc hl,bc` and undone with the
+;     restoring `add hl,bc` when the divisor does not fit (INC leaves the
+;     carry alone, and ADC left it clear: the remainder is below the
+;     divisor, so below 2^23, and doubling it cannot carry out). 12 cycles.
+;   A divisor of 0x800000 or more gives a quotient of 0 or 1: one compare.
 ;
-; IY points at the cell __idivu_buf (Q at +0..2, R at +3..5); DE holds
-; the divisor and B counts the rounds.
+; Fewer rounds for small operands: the rounds go 8 at a time (B counts the
+; groups in the narrow loop, A in the wide one, where BC is the divisor),
+; one group per significant byte of the dividend; the dividend is first
+; shifted up by its leading zero bytes, which as rounds would only shift
+; zeros into a zero remainder. In the narrow loop a top byte below the
+; divisor is the remainder outright, saving its 8 rounds; in the wide loop
+; the top S bytes are, where S is the divisor's byte length less one (the
+; top S bytes are below 256^S <= divisor), and a dividend below the
+; divisor returns at once with quotient 0.
+;
+; Division by zero (undefined in C) keeps the old result: quotient
+; 0xFFFFFF, remainder the dividend.
+;
+; Interrupts: the wide setup reads bytes out of a register by pushing it
+; and popping it back at an offset; it only ever reads at or above SP, so
+; an interrupt's pushes below SP cannot disturb it.
 ; ===========================================================================
-;;sect bss __idivu_buf g 6
 ;;sect code __idivu g
-;;ref __idivu_buf
 __idivu:
-        ex      de, hl                  ; hl = dividend, de = divisor
-        ld      (__idivu_buf+0), hl     ; Q = dividend
-        ld      hl, 0
-        ld      (__idivu_buf+3), hl     ; R = 0
-        ld      iy, __idivu_buf
-        ld      b, 24
-@loop:
-        ; Q:R <<= 1: SLA puts 0 in the lowest bit, each RL takes the
-        ; carry from the byte below
-        sla     (iy+0)
-        rl      (iy+1)
-        rl      (iy+2)
-        rl      (iy+3)
-        rl      (iy+4)
-        rl      (iy+5)
-        ld      hl, (iy+3)              ; hl = R
+        ld      bc, 0xFFFF80            ; -128
+        add     hl, bc                  ; C iff divisor >= 128
+        jp      c, @wide
+        ; ---- narrow: divisor 0..127, HL = divisor - 128, L = divisor ^ 0x80
+        ld      a, l
+        xor     0x80                    ; A = divisor, Z iff divisor = 0
+        jr      z, @dz
+        ld      c, a                    ; C = divisor
+        ex      de, hl                  ; HL = dividend
+        ld      de, 0xFF0000
+        add     hl, de                  ; C iff dividend >= 0x10000; low 16 kept
+        jr      c, @n3
+        ld      a, h
         or      a
-        sbc     hl, de                  ; hl = R - divisor
-        jr      c, @noSub               ; R < divisor: leave quotient bit 0
-        ld      (iy+3), hl              ; R -= divisor
-        set     0, (iy+0)               ; quotient bit = 1
-@noSub:
-        djnz    @loop
-        ld      hl, (iy+0)              ; hl = quotient
+        jr      z, @n1                  ; dividend < 0x100
+        cp      c
+        jr      c, @n2s                 ; H < divisor: H is the remainder
+        ; two bytes: shift them to the top (HLU, garbage, goes out), 16 rounds
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      b, 2
+        xor     a
+@nrounds:
+        add     hl, hl                  ; 1
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 2
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 3
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 4
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 5
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 6
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 7
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        add     hl, hl                  ; 8
+        rla
+        cp      c
+        jr      c, $+4
+        sub     c
+        inc     l
+        djnz    @nrounds
+        ld      de, 0
+        ld      e, a                    ; DE = remainder
+        ret                             ; HL = quotient
+@dz:    scf
+        sbc     hl, hl                  ; HL = 0xFFFFFF, DE = dividend
+        ret
+@n1:    ld      a, l                    ; one byte (A was 0)
+        cp      c
+        jr      c, @tiny                ; dividend < divisor
+        xor     a
+@n2s:   ld      h, l                    ; A = remainder so far; L is the
+        ld      l, 0                    ; last byte: to the top, 8 rounds
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      b, 1
+        jr      @nrounds
+@n3:    or      a
+        sbc     hl, de                  ; HL = dividend again
+        ld      b, 3
+        xor     a
+        jr      @nrounds
+@tiny:  ld      de, 0
+        ld      e, a                    ; DE = remainder = dividend
+        ld      hl, 0                   ; HL = quotient = 0
         ret
 
-; ===========================================================================
-; __iremu: hl = de % hl  (unsigned) - same algorithm as __idivu, returning
-; the remainder (R) instead of the quotient (Q). An independent copy of
-; the loop with its own cell, __iremu_buf, rather than a subroutine shared
-; with __idivu: simpler, at the cost of duplicated bytes in a program that
-; uses both / and %.
-; ===========================================================================
-;;sect bss __iremu_buf g 6
-;;sect code __iremu g
-;;ref __iremu_buf
-__iremu:
+        ; ---- wide: HL = divisor - 128, DE = dividend. BC holds the
+        ; divisor, so A counts the groups of 8 rounds here.
+@wide:  ld      bc, 0xFF0080            ; 128 - 0x10000
+        add     hl, bc                  ; HL = divisor - 0x10000, C iff >= it
+        jr      c, @wbig
+        ld      a, h                    ; divisor's H (the low 16 bits kept)
+        ld      bc, 0x010000
+        add     hl, bc                  ; HL = divisor
+        push    hl
+        pop     bc                      ; BC = divisor
+        ex      de, hl                  ; HL = dividend
+        or      a
+        sbc     hl, bc
+        jp      c, @wless               ; dividend < divisor
+        add     hl, bc                  ; HL = dividend
+        ld      de, 0xFF0000
+        or      a
+        jr      nz, @w1                 ; divisor >= 0x100: S = 1
+        ; S = 0, divisor 0x80..0xFF: all the dividend's bytes take rounds
+        add     hl, de                  ; C iff dividend >= 0x10000
+        jr      c, @w0n3
+        inc     h
+        dec     h
+        jr      z, @w0n1                ; dividend < 0x100
+        add     hl, hl                  ; two bytes: to the top
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, 2
+        jr      @w0go
+@w0n1:  ld      h, l                    ; one byte: to the top
+        ld      l, 0
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, 1
+        jr      @w0go
+@w0n3:  or      a
+        sbc     hl, de                  ; HL = dividend again
+        ld      a, 3
+@w0go:  ld      de, 0                   ; remainder 0
+        jr      @wready
+        ; S = 1, divisor 0x100..0xFFFF, so the dividend has 2 or 3 bytes
+        ; and its top one is the remainder outright
+@w1:    add     hl, de                  ; C iff dividend >= 0x10000
+        jr      c, @w1n3
+        ld      de, 0
+        ld      e, h                    ; DE = H, the top byte
+        ld      h, l                    ; the low byte to the top
+        ld      l, 0
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, 1
+        jr      @wready
+@w1n3:  or      a
+        sbc     hl, de                  ; HL = dividend again
+        ld      de, 0
+        push    de                      ; three zero bytes above a copy:
+        push    hl                      ; L, H, HLU at SP, SP+1, SP+2
+        inc     sp
+        inc     sp
+        pop     de                      ; DE = HLU, the top byte
+        inc     sp
+        add     hl, hl                  ; the other two to the top
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, 2
+        jr      @wready
+        ; divisor >= 0x10000: HL = divisor - 0x10000
+@wbig:  ld      bc, 0x810000            ; 0x10000 - 0x800000
+        add     hl, bc                  ; HL = divisor - 0x800000, C iff >= it
+        ld      bc, 0x800000
+        jp      c, @huge
+        add     hl, bc                  ; HL = divisor
+        push    hl
+        pop     bc                      ; BC = divisor
+        ex      de, hl                  ; HL = dividend
+        or      a
+        sbc     hl, bc
+        jp      c, @wless               ; dividend < divisor
+        add     hl, bc                  ; HL = dividend, 3 bytes: S = 2,
+        ld      de, 0                   ; its top two are the remainder
+        push    de
+        push    hl
+        inc     sp
+        pop     de                      ; DE = HL >> 8
+        inc     sp
+        inc     sp
+        add     hl, hl                  ; the low byte to the top
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, 1
+@wready:                                ; DE = remainder, HL = dividend's rest,
+        ex      de, hl                  ; A = groups: now HL = rem, DE = rest
+@wrounds:
+        ex      de, hl                  ; 1
+        add     hl, hl
         ex      de, hl
-        ld      (__iremu_buf+0), hl
-        ld      hl, 0
-        ld      (__iremu_buf+3), hl
-        ld      iy, __iremu_buf
-        ld      b, 24
-@loop:
-        sla     (iy+0)
-        rl      (iy+1)
-        rl      (iy+2)
-        rl      (iy+3)
-        rl      (iy+4)
-        rl      (iy+5)
-        ld      hl, (iy+3)
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 2
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 3
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 4
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 5
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 6
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 7
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        ex      de, hl                  ; 8
+        add     hl, hl
+        ex      de, hl
+        adc     hl, hl
+        inc     e
+        sbc     hl, bc
+        jr      nc, $+4
+        add     hl, bc
+        dec     e
+        dec     a
+        jr      nz, @wrounds
+        ex      de, hl                  ; HL = quotient, DE = remainder
+        ret
+@wless: add     hl, bc                  ; HL = dividend
+        ex      de, hl                  ; DE = remainder = dividend
+        ld      hl, 0                   ; quotient 0
+        ret
+@huge:  add     hl, bc                  ; HL = divisor (>= 0x800000)
+        push    hl
+        pop     bc                      ; BC = divisor
+        ex      de, hl                  ; HL = dividend
         or      a
-        sbc     hl, de
-        jr      c, @noSub
-        ld      (iy+3), hl
-        set     0, (iy+0)
-@noSub:
-        djnz    @loop
-        ld      hl, (iy+3)              ; hl = remainder
+        sbc     hl, bc
+        jr      nc, @hone               ; dividend >= divisor: quotient 1
+        add     hl, bc
+        ex      de, hl                  ; DE = remainder = dividend
+        ld      hl, 0
+        ret
+@hone:  ex      de, hl                  ; DE = dividend - divisor
+        ld      hl, 1
         ret
 
 ; ===========================================================================
-; __idivs: hl = de / hl  (signed, truncating toward zero, per C89's /).
-; Takes the absolute value of both operands, divides via __idivu, then
-; negates the quotient if exactly one operand was negative. Sign of a
-; 24-bit value is read via a non-destructive `ld bc,0 / or a / sbc hl,bc`
-; (subtracting zero changes nothing but still sets S from hl's true sign,
-; including bit 23 - which is otherwise inaccessible - because the eZ80
-; correctly derives S from the full 24-bit ALU result in ADL mode).
-;
-; The result's sign is kept in the cell __idivs_neg (1: negate the
-; quotient), written before the call to __idivu and read after it;
-; __idivu does not touch it. Negating is `0 - x` by `sbc hl,bc`, as the
-; eZ80 has no 24-bit NEG. The most negative int, -8388608, has no
-; positive counterpart, but its magnitude 0x800000 is right when the
-; division treats it as unsigned, so it divides correctly (and -8388608
-; / -1 wraps back to -8388608, C leaving that overflow undefined).
+; __iremu: hl = de % hl  (unsigned): __idivu leaves the remainder in DE.
 ; ===========================================================================
-;;sect bss __idivs_neg g 1
+;;sect code __iremu g
+;;ref __idivu
+__iremu:
+        call    __idivu
+        ex      de, hl
+        ret
+
+; ===========================================================================
+; __idivs: hl = de / hl  (signed, truncating toward zero, per C's /).
+; Divides the magnitudes with __idivu and negates the quotient if exactly
+; one operand was negative; the signs steer the branches, so nothing is
+; kept in memory.
+;
+; Sign test: with BC = 0x800000, `add hl,bc` twice leaves HL as it was
+; (adding 2^24 in all) and the second add carries exactly when HL is
+; non-negative (the first flipped bit 23, and the second carries it out).
+; Negating is `0 - x` by `sbc hl,hl` / `sbc hl,de`, as the eZ80 has no
+; 24-bit NEG. The most negative int, -8388608, negates to itself, which as
+; an unsigned magnitude (0x800000) is right; -8388608 / -1 wraps back to
+; -8388608 (C leaves that overflow undefined).
+; ===========================================================================
 ;;sect code __idivs g
-;;ref __idivs_neg
 ;;ref __idivu
 __idivs:
-        xor     a
-        ld      (__idivs_neg), a
-
-        ; --- test dividend's sign (de), without disturbing de or hl ---
-        push    hl
-        push    de
-        pop     hl                      ; hl = dividend copy; de unchanged
-        ld      bc, 0
-        or      a
-        sbc     hl, bc                  ; hl unchanged; flags = dividend's sign
-        pop     hl                      ; hl = divisor restored
-        jp      p, @div_ok
-        ld      a, 1
-        ld      (__idivs_neg), a
-@div_ok:
-        ; --- test divisor's sign (hl) ---
-        ld      bc, 0
-        or      a
-        sbc     hl, bc                  ; hl unchanged; flags = divisor's sign
-        jp      p, @dvr_ok
-        ld      a, (__idivs_neg)
-        xor     1
-        ld      (__idivs_neg), a
-@dvr_ok:
-        ; --- negate dividend (de) if it was negative ---
-        push    hl                      ; save divisor
-        push    de
-        pop     hl                      ; hl = dividend copy
-        ld      bc, 0
-        or      a
-        sbc     hl, bc                  ; hl unchanged; flags = dividend's sign
-        jp      p, @div_abs_done
-        push    hl
-        pop     bc                      ; bc = dividend (copy)
-        ld      hl, 0
-        or      a
-        sbc     hl, bc                  ; hl = -dividend
-        ex      de, hl                  ; de = -dividend
-@div_abs_done:
-        pop     hl                      ; hl = divisor restored
-
-        ; --- negate divisor (hl) if it was negative ---
-        ld      bc, 0
-        or      a
-        sbc     hl, bc                  ; hl unchanged; flags = divisor's sign
-        jp      p, @dvr_abs_done
-        push    hl
-        pop     bc                      ; bc = divisor (copy)
-        ld      hl, 0
-        or      a
-        sbc     hl, bc                  ; hl = -divisor
-@dvr_abs_done:
-
-        call    __idivu                 ; de=abs(dividend), hl=abs(divisor) -> hl=quotient
-
-        ld      a, (__idivs_neg)
-        or      a
-        ret     z
-        push    hl
-        pop     bc
-        ld      hl, 0
-        or      a
-        sbc     hl, bc                  ; hl = -quotient
-        ret
-
-; ===========================================================================
-; __irems: hl = de % hl  (signed; result takes the DIVIDEND's sign, per
-; C89's %). Same abs/negate structure as __idivs, but the sign to apply to
-; the result depends only on the dividend, and the core call is __iremu.
-; The sign lives in the cell __irems_neg across that call.
-; ===========================================================================
-;;sect bss __irems_neg g 1
-;;sect code __irems g
-;;ref __irems_neg
-;;ref __iremu
-__irems:
-        xor     a
-        ld      (__irems_neg), a
-
-        ; --- test dividend's sign (de) ---
-        push    hl
-        push    de
-        pop     hl
-        ld      bc, 0
-        or      a
-        sbc     hl, bc
-        pop     hl
-        jp      p, @div_ok
-        ld      a, 1
-        ld      (__irems_neg), a
-@div_ok:
-        ; --- abs divisor (hl); its sign does not affect the result's sign ---
-        ld      bc, 0
-        or      a
-        sbc     hl, bc
-        jp      p, @dvr_ok
-        push    hl
-        pop     bc
-        ld      hl, 0
-        or      a
-        sbc     hl, bc
-@dvr_ok:
-        ; --- abs dividend (de) ---
-        push    hl
-        push    de
-        pop     hl
-        ld      bc, 0
-        or      a
-        sbc     hl, bc
-        jp      p, @div_abs_done
-        push    hl
-        pop     bc
-        ld      hl, 0
-        or      a
-        sbc     hl, bc
+        ld      bc, 0x800000
+        add     hl, bc
+        add     hl, bc                  ; C iff divisor >= 0
+        jr      nc, @dvrneg
         ex      de, hl
-@div_abs_done:
-        pop     hl
-
-        call    __iremu
-
-        ld      a, (__irems_neg)
-        or      a
-        ret     z
+        add     hl, bc
+        add     hl, bc                  ; C iff dividend >= 0
+        ex      de, hl
+        jp      c, __idivu              ; both >= 0: the quotient as it is
+@negdvd:                                ; dividend < 0 <= divisor
         push    hl
-        pop     bc
-        ld      hl, 0
         or      a
-        sbc     hl, bc
+        sbc     hl, hl
+        sbc     hl, de
+        ex      de, hl                  ; DE = -dividend
+        pop     hl
+        call    __idivu
+@negq:  ex      de, hl
+        or      a
+        sbc     hl, hl
+        sbc     hl, de                  ; HL = -quotient
         ret
+@dvrneg:                                ; divisor < 0
+        push    de
+        ex      de, hl
+        or      a
+        sbc     hl, hl
+        sbc     hl, de                  ; HL = -divisor
+        pop     de
+        ex      de, hl
+        add     hl, bc
+        add     hl, bc                  ; C iff dividend >= 0
+        ex      de, hl
+        jr      nc, @bothneg
+        call    __idivu                 ; signs differ: negate
+        jr      @negq
+@bothneg:
+        push    hl
+        or      a
+        sbc     hl, hl
+        sbc     hl, de
+        ex      de, hl                  ; DE = -dividend
+        pop     hl
+        jp      __idivu                 ; signs agree: the quotient as it is
+
+; ===========================================================================
+; __irems: hl = de % hl  (signed; the result takes the DIVIDEND's sign, per
+; C's %). The divisor's sign does not matter: its magnitude is used. Same
+; sign tests and negation as __idivs; __idivu's remainder is in DE.
+; ===========================================================================
+;;sect code __irems g
+;;ref __idivu
+__irems:
+        ld      bc, 0x800000
+        add     hl, bc
+        add     hl, bc                  ; C iff divisor >= 0
+        jr      nc, @dvrneg
+@dvrok: ex      de, hl
+        add     hl, bc
+        add     hl, bc                  ; C iff dividend >= 0
+        ex      de, hl
+        jr      nc, @dvdneg
+        call    __idivu
+        ex      de, hl                  ; HL = remainder
+        ret
+@dvdneg:
+        push    hl
+        or      a
+        sbc     hl, hl
+        sbc     hl, de
+        ex      de, hl                  ; DE = -dividend
+        pop     hl
+        call    __idivu
+        or      a
+        sbc     hl, hl
+        sbc     hl, de                  ; HL = -remainder
+        ret
+@dvrneg:
+        push    de
+        ex      de, hl
+        or      a
+        sbc     hl, hl
+        sbc     hl, de                  ; HL = -divisor
+        pop     de
+        jr      @dvrok
 
 ; ===========================================================================
 ; __ishl: hl = de << hl  (count in hl, value in de; abi.md: a count outside
@@ -1059,15 +1275,20 @@ __lshrs:
         ret
 
 ; __lmul: E:UHL = A:UBC * E:UHL, truncated to 32 bits (the same for signed
-; and unsigned). Shift and add: the multiplier (the right operand) is
-; shifted right one bit at a time, and each set bit adds the multiplicand,
-; which doubles every round. Scratch: m = 0..3 (the multiplicand, the
-; left operand), n = 4..7 (the multiplier), result = 8..11. Bits that
-; the doubling pushes out of m's top byte are dropped: they belong above
-; bit 31. Always 32 rounds, whatever the operands.
+; and unsigned). Built from MLT byte products, as __imul is: with the left
+; operand's bytes a0..a3 and the right's b0..b3, byte k of the product
+; gathers every a_i*b_j with i + j = k, and only the ten pairs with
+; i + j <= 3 reach the low 32 bits. One column at a time: a 24-bit
+; accumulator in HL takes the column's carry and its 16-bit products
+; (MLT leaves BC's top byte zero, so `add hl,bc` adds exactly the
+; product); its low byte is the result's byte k, and the rest, shifted
+; down a byte, is the next column's carry. The shift is a store and a
+; reload one byte up, over frame bytes kept zero for it. Column 3 needs
+; only the low bytes. Scratch: the left operand = 0..3, the right = 4..7,
+; the result and the carries = 8..13 (11..13 start zero).
 ;;sect code __lmul g
 __lmul:
-        ld      iy, -12
+        ld      iy, -14
         add     iy, sp
         ld      sp, iy
         ld      (iy+0), bc
@@ -1075,112 +1296,277 @@ __lmul:
         ld      (iy+4), hl
         ld      (iy+7), e
         ld      hl, 0
-        ld      (iy+8), hl
-        ld      (iy+11), l
-        ld      b, 32
-@loop:
-        srl     (iy+7)
-        rr      (iy+6)
-        rr      (iy+5)
-        rr      (iy+4)                  ; C = the multiplier's lowest bit
-        jr      nc, @noadd
-        ld      a, (iy+8)
-        add     a, (iy+0)
-        ld      (iy+8), a
-        ld      a, (iy+9)
-        adc     a, (iy+1)
-        ld      (iy+9), a
-        ld      a, (iy+10)
-        adc     a, (iy+2)
-        ld      (iy+10), a
-        ld      a, (iy+11)
-        adc     a, (iy+3)
-        ld      (iy+11), a
-@noadd:
-        sla     (iy+0)
-        rl      (iy+1)
-        rl      (iy+2)
-        rl      (iy+3)
-        djnz    @loop
-        ld      hl, (iy+8)
-        ld      e, (iy+11)
-        ld      iy, 12
+        ld      (iy+11), hl             ; the zeros the reloads read
+        ; column 0: a0*b0
+        ld      b, (iy+0)
+        ld      c, (iy+4)
+        mlt     bc
+        ld      (iy+8), bc              ; byte 0, and the carry at 9
+        ld      hl, (iy+9)              ; HL = the carry (bytes 10, 11 are 0)
+        ; column 1: a0*b1, a1*b0
+        ld      b, (iy+0)
+        ld      c, (iy+5)
+        mlt     bc
+        add     hl, bc
+        ld      b, (iy+1)
+        ld      c, (iy+4)
+        mlt     bc
+        add     hl, bc
+        ld      (iy+9), hl              ; byte 1
+        ld      hl, (iy+10)             ; the carry (byte 12 is 0)
+        ; column 2: a0*b2, a1*b1, a2*b0
+        ld      b, (iy+0)
+        ld      c, (iy+6)
+        mlt     bc
+        add     hl, bc
+        ld      b, (iy+1)
+        ld      c, (iy+5)
+        mlt     bc
+        add     hl, bc
+        ld      b, (iy+2)
+        ld      c, (iy+4)
+        mlt     bc
+        add     hl, bc
+        ld      (iy+10), hl             ; byte 2
+        ld      hl, (iy+11)             ; the carry (byte 13 is 0)
+        ; column 3: the low bytes of a0*b3, a1*b2, a2*b1, a3*b0
+        ld      a, l
+        ld      b, (iy+0)
+        ld      c, (iy+7)
+        mlt     bc
+        add     a, c
+        ld      b, (iy+1)
+        ld      c, (iy+6)
+        mlt     bc
+        add     a, c
+        ld      b, (iy+2)
+        ld      c, (iy+5)
+        mlt     bc
+        add     a, c
+        ld      b, (iy+3)
+        ld      c, (iy+4)
+        mlt     bc
+        add     a, c
+        ld      e, a                    ; byte 3
+        ld      hl, (iy+8)              ; bytes 0..2
+        ld      iy, 14
         add     iy, sp
         ld      sp, iy
         ret
 
 ; __ldivmodu: E:UHL = A:UBC / E:UHL and A:UBC = A:UBC % E:UHL, unsigned.
-; Restoring division, one quotient bit per round: shift the 64-bit pair
-; (R, Q) left, then subtract the divisor from R if it fits ("restoring":
-; the trial difference is kept only when it does not borrow). The bit
-; shifted out of R is kept in register D: when it is set, R certainly
-; exceeds the divisor and the subtraction happens regardless of the
-; byte-wise borrow. That bit is in fact always 0: before round k, R holds
-; at most the dividend's top k-1 bits, so it is below 2^(k-1) and the
-; shifted R fits in 32 bits (the same bound as __idivu's); the test only
-; costs a few cycles a round. Division by zero is undefined (it gives a
-; quotient of all ones and the dividend as remainder).
-; Scratch: Q = 0..3 (the dividend, becoming the quotient), R = 4..7,
-; the divisor = 8..11, R - divisor = 12..14 (its top byte stays in A).
+; Restoring division, one quotient bit per round, run only over the
+; dividend bytes that can give a nonzero quotient byte, with the working
+; values in registers. If the dividend has bn significant bytes and the
+; divisor bd, the quotient has at most k = bn - bd + 1 bytes: the top
+; bd - 1 bytes of the dividend go straight into the partial remainder R
+; (they are below 256^(bd-1) <= the divisor, so their quotient bits are
+; all 0) and only the low k bytes go through the rounds: 24 rounds for a
+; 32-bit dividend and a 16-bit divisor, 16 for a 24-bit dividend, none
+; when k <= 0 (the quotient is 0 and the remainder the dividend).
+; The fast loop, for a divisor of at most 2^23: R in HL, the divisor in
+; DE, the dividend byte in A. R < divisor <= 2^23, so 2R + 1 fits in 24
+; bits; `sbc hl,de` is the trial subtraction and `add hl,de` undoes it
+; when it borrows, which carries: the carry is the quotient bit inverted,
+; and the next `rla` takes it into A as it moves the next dividend bit
+; out (a ninth `rla` and a `cpl` give the quotient byte). The eight
+; rounds of a byte are written out.
+; The slow loop, for a divisor above 2^23 (so at most two quotient bytes,
+; one if the divisor is 2^24 or more): R in A:UHL, 32 bits with a 33rd
+; in the carry after the shift (a set 33rd bit means R exceeds the
+; divisor), the divisor's low 24 bits in DE and its top byte in the
+; frame; the quotient byte builds in C.
+; Frame (IY = SP, 7 bytes): 0..3 the dividend, its bytes replaced by the
+; quotient's from the top as they are made (bytes k..3 set to 0 first);
+; 4..6 zero, so the 24-bit load at k reads R's starting value whatever k
+; is (the slow loop keeps the divisor's top byte at 6, past any load).
+; The quotient leaves through `pop hl` / `pop de`, which free the frame.
+; Division by zero is undefined (it returns, with no particular result).
 ; Returns both results, so __ldivu, __lremu, __ldivs and __lrems all
-; share this one loop.
+; share this one routine. Clobbers A, F, BC, D and IY.
 ;;sect code __ldivmodu g
 __ldivmodu:
-        ld      iy, -15
+        ld      iy, -7
         add     iy, sp
-        ld      sp, iy
+        ld      sp, iy                  ; IY = SP = the frame
         ld      (iy+0), bc
-        ld      (iy+3), a
-        ld      (iy+8), hl
-        ld      (iy+11), e
+        ld      (iy+3), a               ; frame 0..3 = the dividend
+        ex      de, hl                  ; DE = the divisor's low 24 bits
+        ld      c, l                    ; C = its top byte
         ld      hl, 0
-        ld      (iy+4), hl
-        ld      (iy+7), l
-        ld      b, 32
-@loop:
-        sla     (iy+0)
-        rl      (iy+1)
-        rl      (iy+2)
-        rl      (iy+3)
-        rl      (iy+4)
-        rl      (iy+5)
-        rl      (iy+6)
-        rl      (iy+7)
-        ld      d, 0                    ; ld leaves the carry alone
-        rl      d                       ; d = the bit shifted out of R
-        ; trial R - divisor, byte by byte with the borrow chained by SBC
-        ld      a, (iy+4)
-        sub     (iy+8)
-        ld      (iy+12), a
-        ld      a, (iy+5)
-        sbc     a, (iy+9)
-        ld      (iy+13), a
-        ld      a, (iy+6)
-        sbc     a, (iy+10)
-        ld      (iy+14), a
-        ld      a, (iy+7)
-        sbc     a, (iy+11)
-        jr      nc, @sub
-        bit     0, d
-        jr      z, @nosub               ; R < divisor, and R fitted in 32 bits
-@sub:
-        ld      (iy+7), a               ; R = R - divisor
-        ld      a, (iy+12)
-        ld      (iy+4), a
-        ld      a, (iy+13)
-        ld      (iy+5), a
-        ld      a, (iy+14)
-        ld      (iy+6), a
-        set     0, (iy+0)               ; this quotient bit is 1
-@nosub:
-        djnz    @loop
-        ld      hl, (iy+0)
-        ld      e, (iy+3)
-        ld      bc, (iy+4)
-        ld      a, (iy+7)
-        ld      iy, 15
-        add     iy, sp
-        ld      sp, iy
+        ld      (iy+4), hl              ; frame 4..6 = 0
+        or      a                       ; B = bn: test the dividend's
+        ld      b, 4                    ; bytes from the top (ld leaves
+        jr      nz, @bn                 ; the flags alone)
+        ld      a, (iy+2)
+        or      a
+        ld      b, 3
+        jr      nz, @bn
+        ld      a, (iy+1)
+        or      a
+        ld      b, 2
+        jr      nz, @bn
+        ld      a, (iy+0)
+        or      a
+        ld      b, 1
+        jr      z, @q0                  ; a dividend of 0
+@bn:
+        inc     c
+        dec     c
+        jr      nz, @big                ; divisor >= 2^24
+        ld      hl, 0xFFFF
+        or      a
+        sbc     hl, de
+        jr      c, @d3                  ; divisor >= 2^16
+        inc     d
+        dec     d
+        jr      z, @k                   ; divisor < 2^8: k = bn
+        dec     b                       ; a 2-byte divisor: k = bn - 1
+        jr      nz, @k
+@q0:                                    ; quotient 0, remainder the dividend
+        ld      bc, (iy+0)
+        ld      a, (iy+3)
+        pop     de
+        pop     de
+        inc     sp
+        ld      hl, 0
+        ld      e, l
+        ret
+@d3:                                    ; divisor 2^16 .. 2^24 - 1: k = bn - 2
+        ld      hl, 0x800000
+        or      a
+        sbc     hl, de                  ; C iff divisor > 2^23
+        dec     b                       ; (dec leaves the carry alone)
+        jr      z, @q0
+        dec     b
+        jr      z, @q0
+        jr      nc, @k
+        jr      @slow                   ; B = 1 or 2
+@big:                                   ; divisor >= 2^24: k = 1 if bn = 4
+        ld      a, b
+        cp      4
+        jr      nz, @q0
+        ld      b, 1
+@slow:                                  ; B = k; C = the divisor's top byte
+        ld      (iy+6), c
+        ld      a, b
+        ld      bc, 0
+        dec     a
+        jr      z, @s1
+        ld      hl, (iy+2)              ; k = 2: R = bytes 2..3
+        ld      (iy+2), bc              ; quotient bytes 2..3 = 0 (and 4)
+        xor     a                       ; R's top byte
+        ld      c, (iy+1)
+        call    @sbyte
+        ld      (iy+1), c
+        jr      @s0
+@s1:    ld      hl, (iy+1)              ; k = 1: R = bytes 1..3
+        ld      (iy+1), bc              ; quotient bytes 1..3 = 0
+        xor     a
+@s0:    ld      c, (iy+0)
+        call    @sbyte
+        ld      (iy+0), c
+        push    hl
+        pop     bc                      ; the remainder, A:UBC
+        pop     hl
+        pop     de
+        inc     sp
+        ret
+@k:                                     ; B = k, 1 to 4
+        ld      a, b
+        ld      bc, 0
+        ld      c, a
+        add     iy, bc                  ; IY = frame + k
+        ld      hl, (iy+0)              ; R = the dividend >> 8k
+        ld      c, b                    ; BC = 0
+        ld      (iy+0), bc              ; quotient bytes k..3 = 0
+        ld      b, a                    ; B counts the bytes left
+@byte:
+        dec     iy
+        ld      a, (iy+0)               ; the next dividend byte down
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f1                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f1:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f2                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f2:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f3                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f3:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f4                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f4:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f5                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f5:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f6                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f6:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f7                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f7:
+        rla                             ; next dividend bit out, ~q in
+        adc     hl, hl                  ; R = 2R + bit, no carry out
+        sbc     hl, de                  ; trial R - divisor
+        jr      nc, @f8                 ; it fits: q = 1, carry clear
+        add     hl, de                  ; undo it; this carries: q = 0
+@f8:
+        rla                             ; the last inverted bit in
+        cpl
+        ld      (iy+0), a               ; the quotient byte
+        djnz    @byte
+        push    hl
+        pop     bc                      ; the remainder, below 2^23
+        xor     a
+        pop     hl                      ; quotient bytes 0..2
+        pop     de                      ; E = quotient byte 3
+        inc     sp                      ; the frame's last byte
+        ret
+
+; Eight rounds of the slow loop: C = the dividend byte in, its quotient
+; byte out; R = A:UHL; the divisor = (iy+6):UDE. Clobbers B.
+@sbyte:
+        ld      b, 8
+@sr:    sla     c                       ; dividend bit out, q = 0 in
+        adc     hl, hl
+        adc     a, a                    ; R = 2R + bit; C = its 33rd bit
+        jr      c, @sovf
+        sbc     hl, de
+        sbc     a, (iy+6)               ; trial R - divisor
+        jr      c, @srest
+        inc     c                       ; it fits: q = 1
+        djnz    @sr
+        ret
+@srest: add     hl, de                  ; it does not: undo it
+        adc     a, (iy+6)
+        djnz    @sr
+        ret
+@sovf:  or      a                       ; R >= 2^32 > divisor: subtract,
+        sbc     hl, de                  ; the result fits in 32 bits
+        sbc     a, (iy+6)
+        inc     c
+        djnz    @sr
         ret
 
 ; __ldivu: E:UHL = A:UBC / E:UHL, unsigned. A tail jump: __ldivmodu's

@@ -18,7 +18,7 @@
  * stopped, closes it, and reopens it there afterwards (rd_open_at), so
  * nesting to depth 8 never needs more of MOS's file handles.
  *
- * #include <name> searches the -I directories, then /usrlib, then /lib;
+ * #include <name> searches the -I directories, then /usrlib, then /lib/agonc;
  * #include "name" first searches the including file's directory
  * (driver.md section 4).
  *
@@ -193,6 +193,7 @@ struct macro {
     int repl;
     int params;         /* the parameter names, "a,b" (to compare redefinitions) */
     int nparams;        /* -1: an object-like macro */
+    int variadic;       /* its last parameter is "...", named __VA_ARGS__ (C99) */
     int active;         /* being rescanned: not expanded again inside itself */
     int next;           /* hash chain, or the free list */
 };
@@ -276,6 +277,8 @@ static void define(char *name, int nparams, char *params, char *repl)
     macros[m].repl = store(repl);
     macros[m].params = store(params);
     macros[m].nparams = nparams;
+    macros[m].variadic = nparams > 0 && strlen(params) >= 11
+                         && strcmp(params + strlen(params) - 11, "__VA_ARGS__") == 0;
     macros[m].active = 0;
     macros[m].next = mhash[h];
     mhash[h] = m;
@@ -368,14 +371,18 @@ static char *literal_end(char *p)
     return p;
 }
 
+static int strict;              /* -ansi: trigraphs are replaced (c89_spec.md section 1) */
+
 /* The end of the preprocessing number starting at p (C89 3.1.8): digits,
- * letters, '_' and '.', and a sign straight after an e or E, so that
- * 1e+5 and 0x1Fu are each one token and nothing inside them is taken for
- * a macro name. p is past the first character, so p[-1] is safe. */
+ * letters, '_' and '.', and a sign straight after an e or E (or, in the
+ * default mode, C99's p or P), so that 1e+5, 0x1p-3 and 0x1Fu are each
+ * one token and nothing inside them is taken for a macro name. p is past
+ * the first character, so p[-1] is safe. */
 static char *number_end(char *p)
 {
     while (is_alpha(*p) || is_digit(*p) || *p == '.'
-           || ((*p == '+' || *p == '-') && (p[-1] == 'e' || p[-1] == 'E')))
+           || ((*p == '+' || *p == '-')
+               && (p[-1] == 'e' || p[-1] == 'E' || (!strict && (p[-1] == 'p' || p[-1] == 'P')))))
         p++;
     return p;
 }
@@ -410,8 +417,6 @@ static int read_line(void)
 {
     return read_line_at(0);
 }
-
-static int strict;              /* -ansi: trigraphs are replaced (c89_spec.md section 1) */
 
 /* C89 2.1.1.2's first phase: the nine trigraphs, replaced in strict mode;
  * in the default mode they stay, with a warning (c89_spec.md 1). raw is
@@ -861,6 +866,53 @@ static int starts_literal(char *p)
 
 static void scan(void);
 
+/* Past white space at the scan position, in whatever frame it is. */
+static int cur_nonspace(void)
+{
+    int c;
+
+    for (;;) {
+        c = cur();
+        if (!is_space(c))
+            return c;
+        skip_to(at() + 1);
+    }
+}
+
+/* C99's _Pragma("text") operator (6.10.9), in the default mode, after its
+ * name: the operator and its string are taken out of the line, and the
+ * pragma is ignored with a warning, as an unknown #pragma is. #pragma
+ * weak, the one pragma cpp acts on, is a directive's own output line,
+ * which a pragma in the middle of a line cannot be, so _Pragma("weak x")
+ * says to use the directive. */
+static void pragma_operator(void)
+{
+    char *p;
+
+    if (cur_nonspace() != '(') {
+        error("_Pragma needs a string in parentheses");
+        return;
+    }
+    skip_to(at() + 1);
+    cur_nonspace();
+    p = at();
+    if (*p != '"') {
+        error("_Pragma needs a string literal");
+        return;
+    }
+    skip_to(any_literal_end(p));
+    if (cur_nonspace() != ')') {
+        error("missing ')' after _Pragma's string");
+        return;
+    }
+    skip_to(at() + 1);
+    p = skip_ws(p + 1);
+    if (strncmp(p, "weak", 4) == 0 && !is_alpha(p[4]) && !is_digit(p[4]))
+        warning("_Pragma(\"weak ...\") is ignored: use the #pragma weak directive");
+    else
+        warning("_Pragma is ignored");
+}
+
 /* An argument, fully macro-expanded on its own (C89 3.8.3.1), into xtext.
  * A nested scan: the argument is pushed as a frame that becomes the
  * scan's floor (fbase), so the scan stops at its end and cannot take
@@ -1028,9 +1080,11 @@ static int call(int m, char *name)
             skip_to(e);
             continue;
         }
+        /* a variadic macro's last argument takes the rest, commas and all */
         if (c == '(') {
             nest++;
-        } else if (c == ')' || (c == ',' && nest == 0)) {
+        } else if (c == ')' || (c == ',' && nest == 0
+                                && !(macros[m].variadic && nargs == macros[m].nparams - 1))) {
             if (c == ')' && nest > 0) {
                 nest--;
             } else {
@@ -1054,6 +1108,10 @@ static int call(int m, char *name)
     in_call = save_in;
     if (macros[m].nparams == 0 && nargs == 1 && *skip_ws(args[0]) == 0)
         nargs = 0;                      /* f() */
+    if (macros[m].variadic && nargs == macros[m].nparams - 1) {
+        args[nargs] = xend(xused);      /* no variable arguments: __VA_ARGS__ is empty */
+        nargs++;
+    }
     if (nargs != macros[m].nparams) {
         sprintf(nb, " takes %d argument%s, not %d", macros[m].nparams, macros[m].nparams == 1 ? "" : "s", nargs);
         error_s(name, nb);
@@ -1204,6 +1262,8 @@ static void scan(void)
                 sput_n(date_text, strlen(date_text));
             } else if (strcmp(name, "__TIME__") == 0) {
                 sput_n(time_text, strlen(time_text));
+            } else if (!strict && strcmp(name, "_Pragma") == 0) {
+                pragma_operator();
             } else {
                 sput_n(p, e - p);
             }
@@ -1765,7 +1825,8 @@ static int if_value(char *p)
                     p++;
                 }
                 defbuf[o] = find_macro(name) >= 0 || strcmp(name, "__LINE__") == 0
-                            || strcmp(name, "__FILE__") == 0 ? '1' : '0';
+                            || strcmp(name, "__FILE__") == 0 || strcmp(name, "__DATE__") == 0
+                            || strcmp(name, "__TIME__") == 0 ? '1' : '0';
                 defbuf[o + 1] = ' ';
                 o = o + 2;
             } else {
@@ -1838,7 +1899,7 @@ static int join(char *buf, char *dir, char *name)
  * name (starting / or \, or with a drive's ':') is used as it is. Then,
  * for "name" only, the including file's directory (from cur_path, the
  * real path, not the #line name); then incdirs: the -I directories in
- * order, then /usrlib and /lib, which main appends. */
+ * order, then /usrlib and /lib/agonc, which main appends. */
 static int find_include(char *name, int quoted, char *path)
 {
     char dir[CPP_PATH];
@@ -2016,8 +2077,27 @@ static int do_define(char *p)
         p = skip_ws(p + 1);
         while (*p != ')') {
             if (p[0] == '.' && p[1] == '.' && p[2] == '.') {
-                error("'...' in a macro's parameters (a C99 feature)");
-                return 0;
+                /* C99's variadic macro: the arguments from here on, commas
+                 * and all, are the last parameter, __VA_ARGS__ */
+                if (strict) {
+                    error("'...' in a macro's parameters (a C99 feature)");
+                    return 0;
+                }
+                if (np >= MAX_PARAMS - 1) {
+                    error("too many macro parameters (more than 31)");
+                    return 0;
+                }
+                strcpy(pname[np], "__VA_ARGS__");
+                if (np > 0)
+                    strcat(plist, ",");
+                strcat(plist, pname[np]);
+                np++;
+                p = skip_ws(p + 3);
+                if (*p != ')') {
+                    error("'...' must be a macro's last parameter");
+                    return 0;
+                }
+                break;
             }
             if (!is_alpha(*p)) {
                 error("#define needs a parameter name");
@@ -2204,13 +2284,15 @@ static void do_line(char *p)
         error("#line needs a line number");
         return;
     }
+    /* at most 8388607, the largest line a 24-bit int counts on the Agon (C89
+     * asks for 32767), tested before the multiply so it cannot overflow */
     n = 0;
     while (is_digit(*q)) {
-        n = n * 10 + (*q - '0');
-        if (n > 2147483647L) {
+        if (n > (8388607L - (*q - '0')) / 10) {
             error("#line number too large");
             return;
         }
+        n = n * 10 + (*q - '0');
         q++;
     }
     if (n == 0) {
@@ -2545,6 +2627,12 @@ int main(int argc, char **argv)
     strcpy(cur_path, "<command line>");
     strcpy(pres_path, cur_path);
     define("__STDC__", -1, "", "1");
+    /* C99's, which the default mode is but for variable-length arrays and
+     * complex numbers, which C11's two macros say are absent */
+    define("__STDC_VERSION__", -1, "", "199901L");
+    define("__STDC_HOSTED__", -1, "", "1");
+    define("__STDC_NO_VLA__", -1, "", "1");
+    define("__STDC_NO_COMPLEX__", -1, "", "1");
     define("__AGONC__", -1, "", "1");
     define("__EZ80__", -1, "", "1");
     define("__ADL__", -1, "", "1");
@@ -2618,6 +2706,10 @@ int main(int argc, char **argv)
         if (strcmp(a, "-ansi") == 0) {
             strict = 1;
             define("__STRICT_ANSI__", -1, "", "1");     /* as GCC: headers hide C99's names */
+            undefine("__STDC_VERSION__");               /* C89 is C89 */
+            undefine("__STDC_HOSTED__");
+            undefine("__STDC_NO_VLA__");
+            undefine("__STDC_NO_COMPLEX__");
             undefine("__SIZEOF_LONG_LONG__");           /* and no long long */
             undefine("__LONG_LONG_MAX__");
             undefine("__INT64_TYPE__");
@@ -2686,7 +2778,7 @@ int main(int argc, char **argv)
     if (errors)
         return 200;
     incdirs[nincdirs] = "/usrlib";
-    incdirs[nincdirs + 1] = "/lib";
+    incdirs[nincdirs + 1] = "/lib/agonc";
     nincdirs = nincdirs + 2;
     if (strlen(in_path) >= CPP_PATH) {
         fprintf(stderr, "cpp: file name too long: %s\n", in_path);
@@ -2701,6 +2793,7 @@ int main(int argc, char **argv)
     out = fopen(out_path, "wb");
     if (out == NULL) {
         fprintf(stderr, "cpp: cannot create %s\n", out_path);
+        rd_close(&src);                 /* MOS would not close it */
         return 200;
     }
     process();

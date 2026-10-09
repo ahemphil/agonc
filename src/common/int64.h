@@ -28,8 +28,8 @@ int i64_is_neg(const struct i64 *a);
 void i64_add(struct i64 *r, const struct i64 *a, const struct i64 *b);
 void i64_sub(struct i64 *r, const struct i64 *a, const struct i64 *b);
 void i64_mul(struct i64 *r, const struct i64 *a, const struct i64 *b);
-void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b);    /* b != 0 */
-void i64_divs(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b);    /* truncating */
+void i64_divu(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b);    /* b 0: q 0, rem a */
+void i64_divs(struct i64 *q, struct i64 *rem, const struct i64 *a, const struct i64 *b);    /* truncating; b 0 as divu */
 void i64_and(struct i64 *r, const struct i64 *a, const struct i64 *b);
 void i64_or(struct i64 *r, const struct i64 *a, const struct i64 *b);
 void i64_xor(struct i64 *r, const struct i64 *a, const struct i64 *b);

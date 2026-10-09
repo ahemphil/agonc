@@ -53,12 +53,15 @@ int uart_open(long baud, int data_bits, int stop_bits, int parity, int flow)
     return r;
 }
 
-/* MOS 0x16 mos_uclose. */
+/* MOS 0x16 mos_uclose. MOS documents no registers it keeps for the
+ * UART calls, so each saves IX, the frame pointer, as mosapi.c does. */
 void uart_close(void)
 {
     POLL();
-    asm("ld a,0x16\n"
-        "rst.lis 08h");
+    asm("push ix\n"
+        "ld a,0x16\n"
+        "rst.lis 08h\n"
+        "pop ix");
 }
 
 /* MOS 0x17 mos_ugetc answers with carry set on success, clear if the
@@ -69,8 +72,10 @@ int uart_getc(void)
     int r;
 
     POLL();
-    asm("ld a,0x17\n"
+    asm("push ix\n"
+        "ld a,0x17\n"
         "rst.lis 08h\n"
+        "pop ix\n"                     /* pop leaves the flags alone */
         "ld hl,0\n"
         "jr nc,@closed\n"
         "ld l,a\n"
@@ -90,8 +95,10 @@ int uart_putc(int c)
 
     POLL();
     asm("ld c,(ix+6)\n"
+        "push ix\n"
         "ld a,0x18\n"
         "rst.lis 08h\n"
+        "pop ix\n"                     /* (ix+6) is read again below */
         "ld hl,0\n"
         "jr nc,@closed\n"
         "ld l,(ix+6)\n"

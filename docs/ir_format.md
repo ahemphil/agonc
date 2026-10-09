@@ -101,8 +101,12 @@ SO <sym> "<text>"   a string object named <sym>, visibility s, defined beside th
 A string literal whose address an initialiser needs (`char *p = "hi";`) is
 written as `SO __str<id>_<n> "hi"` inside the `D` that uses it, before or
 after the `A` that refers to it; `cc2` emits it as its own data section
-with the terminating NUL. `cc1` therefore never holds an initialiser: it
-streams the items as it parses them.
+with the terminating NUL. `cc1` holds an object's initialiser and writes
+its items in order of address when it is complete, the gaps as `Z`
+(C99's designators may go back), writing early only when its table is
+full. A compound literal's object, `__ini<id>_<n>`, is a `D` of its own:
+written before the code that uses it, or, when the literal is in another
+object's initialiser, after that object's `E` (as a wide string is).
 
 ## 4. Function body records
 

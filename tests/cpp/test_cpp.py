@@ -12,9 +12,9 @@ T4  t_cpp.c (the preprocessor's features, checked at run time) through
     cpp + cc1 + cc2 + ld on the emulator: exit 0. Guards: a wrong
     expectation is reported by its index; the number of checks is verified.
 S1  on the emulator: the AgDev-built cpp preprocesses t_cpp.c twice, once
-    with -I lib and once relying on the compiled-in /lib search; the first
-    equals the host's output byte for byte, the second differs only in
-    naming /lib/string.h. The AgDev-built cc1, cc2 and ld and the device's
+    with -I lib/agonc and once relying on the compiled-in /lib/agonc search;
+    the first equals the host's output byte for byte, the second differs
+    only in naming /lib/agonc/string.h. The AgDev-built cc1, cc2 and ld and the device's
     ez80asm then build it, and it passes.
 """
 import os, shutil, subprocess, sys
@@ -25,7 +25,7 @@ OUT = os.path.join("build", "test", "cpp")
 PY = sys.executable
 HOST = os.path.join("build", "host")
 RUNTIME = [os.path.join("lib", "rt", "crt0.s"), os.path.join("lib", "rt", "rt.s")]
-LIBC = os.path.join("build", "agon", "lib", "libc.s")
+LIBC = os.path.join("build", "agon", "lib", "agonc", "libc.s")
 DEFS = ["-D", "FROM_COMMAND_LINE=42", "-DONE_BY_DEFAULT", "-D", "UNDONE_ON_COMMAND_LINE", "-UUNDONE_ON_COMMAND_LINE"]
 
 
@@ -99,7 +99,17 @@ DIAG = [
     ("duplicate parameter", "#define F(a, a) a", {}, [], 200, ["d.c:1: error: duplicate macro parameter a"]),
     ("missing ) in parameters", "#define F(a b", {}, [], 200, ["d.c:1: error: missing ')' in a macro's parameters"]),
     ("a parameter that is not a name", "#define F(1) 1", {}, [], 200, ["d.c:1: error: #define needs a parameter name"]),
-    ("C99 variadic macro", "#define F(...) 1", {}, [], 200, ["d.c:1: error: '...' in a macro's parameters (a C99 feature)"]),
+    ("variadic macro in strict mode", "#define F(...) 1", {}, ["-ansi"], 200,
+     ["d.c:1: error: '...' in a macro's parameters (a C99 feature)"]),
+    ("variadic macro", "#define F(a, ...) a\n#if F(3, 4, 5) != 3\n#error no\n#endif", {}, [], 0, []),
+    ("'...' not last", "#define F(..., a) a", {}, [], 200, ["d.c:1: error: '...' must be a macro's last parameter"]),
+    ("_Pragma", "_Pragma(\"once\") int x;", {}, [], 0, ["d.c:1: warning: _Pragma is ignored"]),
+    ("_Pragma from a macro", "#define P(x) _Pragma(#x)\nP(pack) int y;", {}, [], 0, ["d.c:2: warning: _Pragma is ignored"]),
+    ("_Pragma weak", "_Pragma(\"weak f\")", {}, [], 0,
+     ["d.c:1: warning: _Pragma(\"weak ...\") is ignored: use the #pragma weak directive"]),
+    ("_Pragma without a string", "_Pragma(x)", {}, [], 200, ["d.c:1: error: _Pragma needs a string literal"]),
+    ("variadic macro with too few arguments", "#define F(a, b, ...) a\nint x = F(1);", {}, [], 200,
+     ["d.c:2: error: F takes 3 arguments, not 1"]),
     ("different parameters", "#define F(a) a\n#define F(b) b", {}, [], 200, ["d.c:2: error: macro redefined differently: F"]),
     ("a function-like macro in #if", "#define F(a) (a * 2)\n#if F(3) != 6\n#error no\n#endif", {}, [], 0, []),
     ("#include from a macro", "#define H \"h.h\"\n#include H\nint x = HV;", {"h.h": "#define HV 1"}, [], 0, []),
@@ -154,6 +164,11 @@ DIAG = [
     ("#line from a macro", "#define N 20\n#line N\n#error here", {}, [], 200, ["d.c:20: error: #error here"]),
     ("#line without a number", "#line x", {}, [], 200, ["d.c:1: error: #line needs a line number"]),
     ("#line 0", "#line 0", {}, [], 200, ["d.c:1: error: #line number must not be 0"]),
+    ("#line at the largest line", "#line 8388607\n#error here", {}, [], 200, ["d.c:8388607: error: #error here"]),
+    ("#line too large", "#line 8388608", {}, [], 200, ["d.c:1: error: #line number too large"]),
+    ("#line far too large", "#line 99999999999999", {}, [], 200, ["d.c:1: error: #line number too large"]),
+    ("defined(__DATE__) and defined __TIME__", "#if defined(__DATE__) && defined __TIME__\n#error both\n#endif", {}, [],
+     200, ["d.c:2: error: #error both"]),
     ("#line with more", "#line 5 \"x.c\" 3", {}, [], 200,
      ["d.c:1: error: #line has more after its line number and file name"]),
     ("#line in an include", "#include \"h.h\"\n#error back", {"h.h": "#line 90 \"z.h\""}, [], 200,
@@ -190,6 +205,10 @@ DIAG = [
      {}, ["-ansi"], 0, []),
     ("// is not a comment in strict mode", "#if 1 // x\n#endif", {}, ["-ansi"], 200, ["d.c:1: error: invalid #if expression"]),
     ("// in a skipped region", "#if 0\nint x; // hi\n#endif", {}, [], 0, []),
+    ("C99's version in the default mode", "#if __STDC_VERSION__ != 199901L || !__STDC_HOSTED__ || !__STDC_NO_VLA__\n"
+     "#error wrong\n#endif", {}, [], 0, []),
+    ("no C99 version in strict mode", "#if defined(__STDC_VERSION__) || defined(__STDC_HOSTED__) || defined(__STDC_NO_VLA__)\n"
+     "#error wrong\n#endif", {}, ["-ansi"], 0, []),
     ("#pragma", "#pragma once", {}, [], 0, ["d.c:1: warning: #pragma is ignored"]),
     ("#pragma weak without a name", "#pragma weak", {}, [], 200, ["d.c:1: error: #pragma weak needs a name"]),
     ("#pragma weak with two names", "#pragma weak a b", {}, [], 200, ["d.c:1: error: #pragma weak takes one name"]),
@@ -225,34 +244,44 @@ def diagnostics():
 
 # ---- T4 ---------------------------------------------------------------------------------
 
-def t4():
-    src = os.path.join("tests", "cpp", "t_cpp.c")
-    p = build(src, "t_cpp", DEFS)
+def run_checks(stem, bad_from, bad_to, bad_index, checks):
+    """tests/cpp/<stem>.c built and run: exit 0; then the two guards, a
+    wrong expectation reported by its index and the number of checks run."""
+    src = os.path.join("tests", "cpp", stem + ".c")
+    p = build(src, stem, DEFS)
     if p:
         return [p]
     problems = []
-    rc = run_bin("t_cpp")
+    rc = run_bin(stem)
     if rc != 0:
         problems.append(f"check {rc} failed (the first failing check's index)")
     text = open(os.path.join(REPO, src)).read()
     # the copies live in OUT, so their headers are found through -I
     inc = ["-I", os.path.join("tests", "cpp")]
-    bad = text.replace("check(nested_line, 7);", "check(nested_line, 8);")
+    bad = text.replace(bad_from, bad_to)
     assert bad != text
     open(os.path.join(REPO, o("t_bad.c")), "w", newline="\n").write(bad)
     p = build(o("t_bad.c"), "t_bad", DEFS + inc)
     rc = run_bin("t_bad") if not p else p
-    if rc != 18:
-        problems.append(f"guard: a wrong expectation gave {rc}, expected its index (18)")
+    if rc != bad_index:
+        problems.append(f"guard: a wrong expectation gave {rc}, expected its index ({bad_index})")
     cnt = text.replace("    if (fails == 0)\n        agon_emu_exit(0);\n    else\n        agon_emu_exit(first < 250 ? first : 250);",
                        "    agon_emu_exit(count);")
     assert cnt != text
     open(os.path.join(REPO, o("t_cnt.c")), "w", newline="\n").write(cnt)
     p = build(o("t_cnt.c"), "t_cnt", DEFS + inc)
     rc = run_bin("t_cnt") if not p else p
-    if rc != 54:
-        problems.append(f"guard: {rc} checks ran, expected 54")
+    if rc != checks:
+        problems.append(f"guard: {rc} checks ran, expected {checks}")
     return problems
+
+
+def t4():
+    return run_checks("t_cpp", "check(nested_line, 7);", "check(nested_line, 8);", 18, 54)
+
+
+def t5():
+    return run_checks("t_cpp99", "check(CALL(two, 3, 4), 34);", "check(CALL(two, 3, 4), 35);", 8, 14)
 
 
 # ---- S1 ---------------------------------------------------------------------------------
@@ -267,11 +296,11 @@ def s1():
     stage = os.path.join(REPO, o("s1"))
     if os.path.isdir(stage):
         shutil.rmtree(stage)
-    os.makedirs(os.path.join(stage, "lib"))
+    os.makedirs(os.path.join(stage, "lib", "agonc"))
     for f in ("t_cpp.c", "t_cpp.h", "t_cpp2.h"):
         shutil.copy(os.path.join(HERE, f), stage)
-    shutil.copy(os.path.join(REPO, "lib", "libc", "string.h"), os.path.join(stage, "lib"))
-    r = sh([os.path.join(REPO, HOST, "cpp.exe"), "t_cpp.c", "a.i", "-I", "lib"] + DEFS, cwd=stage)
+    shutil.copy(os.path.join(REPO, "lib", "libc", "string.h"), os.path.join(stage, "lib", "agonc"))
+    r = sh([os.path.join(REPO, HOST, "cpp.exe"), "t_cpp.c", "a.i", "-I", "lib/agonc"] + DEFS, cwd=stage)
     if r.returncode:
         return [f"host cpp failed: {r.stderr.strip()}"]
     host_i = open(os.path.join(stage, "a.i"), "rb").read()
@@ -283,9 +312,9 @@ def s1():
         args += ["--file", os.path.join("tests", "cpp", f)]
     for f in RUNTIME + [LIBC]:
         args += ["--file", f]
-    args += ["--file-at", "lib/string.h=" + os.path.join("lib", "libc", "string.h")]
+    args += ["--file-at", "lib/agonc/string.h=" + os.path.join("lib", "libc", "string.h")]
     defs = " ".join(DEFS)
-    for c in (f"cpp t_cpp.c /a.i -I lib {defs}",
+    for c in (f"cpp t_cpp.c /a.i -I lib/agonc {defs}",
               f"cpp t_cpp.c /b.i {defs}",
               "cc1 /a.i /a.ir -u t_cpp.c",
               "cc2 /a.ir /a.s",
@@ -296,28 +325,29 @@ def s1():
     r = sh(args + ["--sdcard-name", "cpps1", "--timeout", "600"])
     problems = [] if r.returncode == 0 else [f"device-built t_cpp gave {r.returncode}, expected 0"]
     card = os.path.join(REPO, "emulator_sdcard", "cpps1")
-    for f, want in (("a.i", host_i), ("b.i", host_i.replace(b'"lib/string.h"', b'"/lib/string.h"'))):
+    for f, want in (("a.i", host_i), ("b.i", host_i.replace(b'"lib/agonc/string.h"', b'"/lib/agonc/string.h"'))):
         path = os.path.join(card, f)
         if not os.path.exists(path):
             problems.append(f"the device produced no {f}")
         elif open(path, "rb").read() != want:
             problems.append(f"device {f} differs from the expected output")
-    if b'"lib/string.h"' not in host_i:
-        problems.append("the host output does not name lib/string.h (the /lib check would be vacuous)")
+    if b'"lib/agonc/string.h"' not in host_i:
+        problems.append("the host output does not name lib/agonc/string.h (the /lib/agonc check would be vacuous)")
     return problems
 
 
 def main():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
-    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "libc.s")):
-        print("build/agon/lib/libc.s is missing: run make cross first")
+    if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "agonc", "libc.s")):
+        print("build/agon/lib/agonc/libc.s is missing: run make cross first")
         return 1
     cases = [("T1 golden t_cpp.i", lambda: t1("--update" in sys.argv)),
              (f"D  diagnostics ({len(DIAG)} cases)", diagnostics)]
     if "--no-emu" not in sys.argv:
         cases.append(("T4 t_cpp.c on the emulator + guards", t4))
+        cases.append(("T5 t_cpp99.c (C99: variadic macros) on the emulator + guards", t5))
         if "--no-stage1" not in sys.argv:
-            cases.append(("S1 AgDev cpp (-I and /lib) then cc1+cc2+ld and device ez80asm build t_cpp.c on the emulator", s1))
+            cases.append(("S1 AgDev cpp (-I and /lib/agonc) then cc1+cc2+ld and device ez80asm build t_cpp.c on the emulator", s1))
     failed = 0
     for name, fn in cases:
         problems = fn()

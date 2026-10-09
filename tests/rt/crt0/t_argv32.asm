@@ -1,6 +1,7 @@
 ; crt0 test: invoked with 40 single/double-digit numeric tokens ("1" "2"
 ; ... "40"). Expect the 32-entry cap: argc==32 (argv[0] plus 31 recorded
-; tokens), argv[1]=="1", argv[31]=="31" (tokens 32..40 silently dropped).
+; tokens), argv[1]=="1", argv[31]=="31" (tokens 32..40 silently dropped),
+; and argv[32], argv[argc], a null pointer (the table's 33rd slot).
 ; Exits via port 0: 0 = pass, 1 = fail.
 
         assume  adl=1
@@ -10,7 +11,7 @@
         align   64
         db      "MOS", 0, 1
 
-__bss_size:  equ     96
+__bss_size:  equ     99                  ; as crt0's ;;sect __argv
 __bss_base:  equ     0x0B0000-__bss_size
 __stack_top: equ     __bss_base
 __argv:      equ     __bss_base+0
@@ -51,6 +52,15 @@ _main:
         ld      hl, (hl)                ; argv[31]
         ld      de, str_31
         call    @streq
+        jr      nz, @fail
+
+        ld      hl, (ix+9)
+        ld      de, 32*3
+        add     hl, de
+        ld      hl, (hl)                ; argv[32], which must be null
+        ld      de, 0
+        or      a
+        sbc     hl, de
         jr      nz, @fail
 
         ld      hl, msg_pass
