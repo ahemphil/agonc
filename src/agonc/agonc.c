@@ -14,11 +14,16 @@
  * difference), so it uses no heap and no stdio: fixed tables, limits below.
  *
  * The flow, from main: each argument is copied into arg_text (an @file is
- * replaced by its words), parse() sorts them into inputs, flags and the
- * ordered option list (opt_kind/opt_val: -I -D -U -L -l -Wl, kept in
- * command-line order because search order matters), and build() checks
- * the inputs, runs compile() on each .c and .i and then link_all(). Last,
- * main removes every temporary file unless -save-temps.
+ * replaced by its words, a wildcard pattern by the names it matches),
+ * parse() sorts them into inputs, flags and the ordered option list
+ * (opt_kind/opt_val: -I -D -U -L -l -Wl, kept in command-line order
+ * because search order matters), and build() checks the inputs, runs
+ * compile() on each .c and .i and then link_all(), or lib_all() for
+ * --lib. Last, main removes every temporary file unless -save-temps.
+ *
+ * The tables are the Agon's on the PC too, so that a build that works on
+ * a PC works on the Agon: a path under $AGONC_ROOT counts as the Agon's
+ * shorter one (agon_len). --big-tables raises them on the PC.
  *
  * Running a pass: cmd_start() and cmd_add() build the pass's argument
  * string in cmd, one word at a time; run() passes it to sys_run(). A pass
@@ -46,8 +51,13 @@
 #include <string.h>
 #include "sys.h"
 
-#define VERSION "agonc 1.1.0-beta.2 (Agon C, language C99; C89 with -ansi)\n"
+#define VERSION "agonc 1.1.0-beta.3 (Agon C, language C99; C89 with -ansi)\n"
 
+/* The tables, as the Agon has them. The PC driver has the same limits, so
+ * that what builds on a PC builds on the Agon: a path under $AGONC_ROOT
+ * counts as the Agon's (agon_len), and the PC's arrays are larger only to
+ * hold the longer paths. --big-tables, on the PC, raises every limit
+ * BIG times (lim). */
 #define MAX_ARGS 96             /* after @file expansion */
 #define ARG_TEXT 2048           /* the arguments' text, all together */
 #define MAX_INPUTS 32
@@ -58,8 +68,14 @@
 /* AgDev's crt0 stops at argc 15, argv[0] included, and silently drops the
  * rest of the line */
 #define DIRECT_ARGS 14
-#define MAX_TEMPS 100
-#define TEMP_TEXT 3000          /* the temporary files' names, all together */
+#define MAX_TEMPS 84            /* an .s for each input, the .asm, the response files */
+#define TEMP_TEXT 2000          /* their names, all together (-save-temps keeps each .i and .ir too) */
+#ifdef __AGONC__
+#define BIG 1
+#else
+#define BIG 8
+#endif
+#define PATH_BUF (PATH_SIZE * BIG)
 
 /* an input's kind, from its extension (kind_of) */
 #define K_C 1
@@ -70,20 +86,22 @@
 static int failed;              /* an error so far: every later step does nothing */
 static char *writing;           /* the final output the next program writes, if any */
 
+static int big;                 /* --big-tables (the PC only) */
+
 /* the arguments after @file expansion, their text in arg_text */
-static char *args[MAX_ARGS];
+static char *args[MAX_ARGS * BIG];
 static int nargs;
-static char arg_text[ARG_TEXT];
+static char arg_text[ARG_TEXT * BIG];
 static int arg_used;
 
-static char *inputs[MAX_INPUTS];
-static int kinds[MAX_INPUTS];
-static char *s_path[MAX_INPUTS];        /* each input's .s for the link */
+static char *inputs[MAX_INPUTS * BIG];
+static int kinds[MAX_INPUTS * BIG];
+static char *s_path[MAX_INPUTS * BIG];  /* each input's .s for the link */
 static int ninputs;
 /* -I -D -U -L -l and -Wl, in command-line order: the option letter
  * ('W' for -Wl) and its value */
-static int opt_kind[MAX_OPTS];
-static char *opt_val[MAX_OPTS];
+static int opt_kind[MAX_OPTS * BIG];
+static char *opt_val[MAX_OPTS * BIG];
 static int nopts;
 
 static char *out_path;
@@ -96,25 +114,30 @@ static int optimize = 1;        /* -O (the default), -O1 .. -O3, -Os; -O0 turns 
 static int nostdlib;
 static int save_temps;
 static int make_index;          /* --index: index .s libraries */
+static int make_lib;            /* --lib: compile, join and index a library */
 static int verbose;
 static int timing;              /* -time, or -v: each pass's time and the total */
 static int version;
 static int help;
 
-static char root[PATH_SIZE];    /* sys_root(): "" on the Agon */
+static char root[PATH_BUF];     /* sys_root(): "" on the Agon */
+static int root_len;
 static char date_now[12];       /* for cpp's __DATE__ and __TIME__ (sys_date) */
 static char time_now[12];
-static char tmp_dir[PATH_SIZE]; /* root + "/tmp/agonc/" */
+static char tmp_dir[PATH_BUF];  /* root + "/tmp/agonc/" */
 /* the argument string for the next pass: its length and word count, which
- * run() compares with DIRECT_LEN and DIRECT_ARGS */
-static char cmd[CMD_SIZE + 1];
+ * run() compares with DIRECT_LEN and DIRECT_ARGS, and its length as the
+ * Agon's would be, which counts against CMD_SIZE */
+static char cmd[CMD_SIZE * BIG + 1];
 static int cmd_len;
 static int cmd_n;
+static int cmd_agon;
 /* every temporary file made, for removal at the end; names in temp_text */
-static char *temps[MAX_TEMPS];
+static char *temps[MAX_TEMPS * BIG];
 static int ntemps;
-static char temp_text[TEMP_TEXT];
+static char temp_text[TEMP_TEXT * BIG];
 static int temp_used;
+static int temp_agon;           /* temp_used as the Agon's would be */
 
 /* ---- messages -------------------------------------------------------------- */
 
@@ -150,6 +173,24 @@ static char *decimal(char *buf, int n)
         n = n / 10;
     } while (n > 0);
     return buf + i;
+}
+
+/* A table's limit: the Agon's, or BIG times it with --big-tables. */
+static int lim(int n)
+{
+    return big ? n * BIG : n;
+}
+
+/* s's length as it would be on the Agon: a path under $AGONC_ROOT counts
+ * without it ("" on the Agon itself, so nothing changes there). */
+static int agon_len(char *s)
+{
+    int n;
+
+    n = strlen(s);
+    if (root_len > 0 && strncmp(s, root, root_len) == 0)
+        n = n - root_len;
+    return n;
 }
 
 /* ---- names ------------------------------------------------------------------ */
@@ -202,14 +243,15 @@ static int kind_of(char *path)
     return 0;
 }
 
-/* dst = a + b + c, the part of b before its extension if cut is set;
- * returns dst, or NULL (after an error) if it does not fit. */
+/* dst (PATH_BUF bytes) = a + b + c, the part of b before its extension if
+ * cut is set; returns dst, or NULL (after an error) if it does not fit
+ * the Agon's PATH_SIZE (counted as agon_len counts) or dst. */
 static char *join(char *dst, char *a, char *b, int cut, char *c)
 {
     int nb;
 
     nb = cut ? ext_part(b) - b : strlen(b);
-    if (strlen(a) + nb + strlen(c) >= PATH_SIZE) {
+    if (agon_len(a) + nb + strlen(c) >= PATH_SIZE || strlen(a) + nb + strlen(c) >= PATH_BUF) {
         error("path too long: ", *b ? b : a);   /* b is "" when the root itself is too long */
         return NULL;
     }
@@ -223,7 +265,7 @@ static char *join(char *dst, char *a, char *b, int cut, char *c)
  * list for removal at the end. */
 static char *temp(char *a, char *b, int cut, char *c)
 {
-    char buf[PATH_SIZE];
+    char buf[PATH_BUF];
     char *t;
     int i;
 
@@ -232,16 +274,34 @@ static char *temp(char *a, char *b, int cut, char *c)
     for (i = 0; i < ntemps; i++)        /* a response file is made again for each pass that needs one */
         if (strcmp(temps[i], buf) == 0)
             return temps[i];
-    if (ntemps >= MAX_TEMPS || temp_used + strlen(buf) + 1 > TEMP_TEXT) {
+    if (ntemps >= lim(MAX_TEMPS) || temp_agon + agon_len(buf) + 1 > lim(TEMP_TEXT)
+        || temp_used + strlen(buf) + 1 > sizeof temp_text) {
         error("too many temporary files", "");
         return NULL;
     }
     t = temp_text + temp_used;
     strcpy(t, buf);
     temp_used = temp_used + strlen(buf) + 1;
+    temp_agon = temp_agon + agon_len(buf) + 1;
     temps[ntemps] = t;
     ntemps++;
     return t;
+}
+
+/* A temporary file no longer needed (not with -save-temps): removed now,
+ * and its name taken off the list if it is the last one there, so the
+ * room can be used again. compile() frees each input's .i and .ir this
+ * way, so a build needs a name for each input's .s alone. */
+static void untemp(char *t)
+{
+    if (save_temps || t == NULL)
+        return;
+    sys_remove(t);
+    if (ntemps > 0 && temps[ntemps - 1] == t) {
+        ntemps--;
+        temp_used = t - temp_text;
+        temp_agon = temp_agon - agon_len(t) - 1;
+    }
 }
 
 /* Do two file names agree up to their first '.', letters in either case?
@@ -305,7 +365,7 @@ static int same_path(char *a, char *b)
 /* The n characters at s as the next argument, copied into arg_text. */
 static void add_arg(char *s, int n)
 {
-    if (nargs >= MAX_ARGS || arg_used + n + 1 > ARG_TEXT) {
+    if (nargs >= lim(MAX_ARGS) || arg_used + n + 1 > lim(ARG_TEXT)) {
         if (!failed)
             error("too many arguments", "");
         return;
@@ -317,46 +377,201 @@ static void add_arg(char *s, int n)
     nargs++;
 }
 
+static int lower(int c)
+{
+    return c >= 'A' && c <= 'Z' ? c + 32 : c;
+}
+
+/* Does name match the wildcard pattern p? '*' matches any run of
+ * characters, '?' any one, and letters match in either case, as FAT
+ * names do. A '*' that fails to match goes back to take one more
+ * character, from the last '*' only: enough, since each '*' matches as
+ * little as it can. */
+static int match(char *p, char *s)
+{
+    char *star;
+    char *back;
+
+    star = NULL;
+    back = NULL;
+    while (*s) {
+        if (*p == '*') {
+            star = p;
+            p++;
+            back = s;
+        } else if (*p == '?' || lower(*p) == lower(*s)) {
+            p++;
+            s++;
+        } else if (star != NULL) {
+            p = star + 1;
+            back++;
+            s = back;
+        } else {
+            return 0;
+        }
+    }
+    while (*p == '*')
+        p++;
+    return *p == 0;
+}
+
+/* Names in order, letters in either case alike: wildcards give the same
+ * list on every card and every PC, whatever order the folder keeps. */
+static int name_cmp(char *a, char *b)
+{
+    while (*a && lower(*a) == lower(*b)) {
+        a++;
+        b++;
+    }
+    return lower(*a) - lower(*b);
+}
+
+/* A word with * or ? in its file name becomes the names of the files in
+ * that folder that match, in order, as a shell would make them (MOS does
+ * not). A name starting with a dot is left out unless the pattern starts
+ * with one too. A pattern that matches nothing is an error, and so is a
+ * wildcard in the folder part. */
+static void glob(char *pat)
+{
+    char dir[PATH_BUF];
+    char name[PATH_SIZE];
+    char path[PATH_BUF];
+    char *f;
+    char *p;
+    char *t;
+    int n;
+    int first;
+    int i;
+    int j;
+
+    f = file_part(pat);
+    for (p = pat; p < f; p++) {
+        if (*p == '*' || *p == '?') {
+            error("wildcards go in a file name, not a folder: ", pat);
+            return;
+        }
+    }
+    n = f - pat;
+    if (n >= PATH_SIZE) {
+        error("path too long: ", pat);
+        return;
+    }
+    /* the folder to list: the part before the name, without its last
+     * separator unless that is all there is ("/"), or "" for the current one */
+    memcpy(dir, pat, n);
+    dir[n] = 0;
+    if (n > 1 && (dir[n - 1] == '/' || dir[n - 1] == '\\') && dir[n - 2] != ':')
+        dir[n - 1] = 0;
+    if (!sys_dir_open(dir)) {
+        error("cannot read the folder for ", pat);
+        return;
+    }
+    dir[n] = 0;                         /* the separator back, to join names to */
+    if (n > 0)
+        dir[n - 1] = pat[n - 1];
+    first = nargs;
+    while (!failed && sys_dir_next(name, sizeof name)) {
+        if ((name[0] == '.' && f[0] != '.') || !match(f, name))
+            continue;
+        if (join(path, dir, name, 0, "") != NULL)
+            add_arg(path, strlen(path));
+    }
+    sys_dir_close();
+    if (failed)
+        return;
+    if (nargs == first) {
+        error("no file matches ", pat);
+        return;
+    }
+    for (i = first + 1; i < nargs; i++) {       /* insertion sort: a folder's worth */
+        t = args[i];
+        for (j = i; j > first && name_cmp(args[j - 1], t) > 0; j--)
+            args[j] = args[j - 1];
+        args[j] = t;
+    }
+}
+
+/* One word of the command line or a response file: a wildcard pattern's
+ * matches (glob), or the word itself. Options are never patterns. */
+static void add_word(char *s, int n)
+{
+    char w[PATH_BUF];
+    int i;
+
+    if (s[0] != '-') {
+        for (i = 0; i < n; i++) {
+            if (s[i] == '*' || s[i] == '?') {
+                if (n >= PATH_BUF) {
+                    error("path too long", "");
+                    return;
+                }
+                memcpy(w, s, n);
+                w[n] = 0;
+                glob(w);
+                return;
+            }
+        }
+    }
+    add_arg(s, n);
+}
+
+static int space(int c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
 /* Every argument is copied, so none points into MOS's command buffer; an
- * @file's whitespace-separated words take its place. The file is read
- * into cmd, free until the first pass runs; its words are added as they
- * are, so an @ inside a response file is not expanded again. */
+ * @file's whitespace-separated words take its place. The file is read a
+ * block at a time into cmd, free until the first pass runs; a word cut
+ * by a block's end is read again at the start of the next block. Its
+ * words are added as they are, so an @ inside a response file is not
+ * expanded again; wildcards are (add_word). */
 static void expand(char *a)
 {
+    int off;
     int n;
     int i;
     int j;
 
     if (a[0] != '@') {
-        add_arg(a, strlen(a));
+        add_word(a, strlen(a));
         return;
     }
-    n = sys_read(a + 1, cmd, CMD_SIZE);
-    if (n < 0) {
-        error("cannot open response file ", a + 1);
-        return;
-    }
-    if (n >= CMD_SIZE) {
-        error("response file too long: ", a + 1);
-        return;
-    }
-    i = 0;
-    while (i < n) {
-        if (cmd[i] == ' ' || cmd[i] == '\t' || cmd[i] == '\r' || cmd[i] == '\n') {
-            i++;
-        } else {
+    off = 0;
+    for (;;) {
+        n = sys_read(a + 1, off, cmd, CMD_SIZE);
+        if (n < 0) {
+            error("cannot open response file ", a + 1);
+            return;
+        }
+        i = 0;
+        while (i < n && !failed) {
+            if (space(cmd[i])) {
+                i++;
+                continue;
+            }
             j = i;
-            while (j < n && cmd[j] != ' ' && cmd[j] != '\t' && cmd[j] != '\r' && cmd[j] != '\n')
+            while (j < n && !space(cmd[j]))
                 j++;
-            add_arg(cmd + i, j - i);
+            if (j == n && n == CMD_SIZE) {      /* it may go on in the next block */
+                if (i == 0) {
+                    error("a word too long in response file ", a + 1);
+                    return;
+                }
+                break;
+            }
+            add_word(cmd + i, j - i);
             i = j;
         }
+        if (failed || n < CMD_SIZE)
+            return;
+        off = off + i;
     }
 }
 
 static void add_opt(int kind, char *val)
 {
-    if (nopts >= MAX_OPTS) {
+    if (nopts >= lim(MAX_OPTS)) {
         error("too many -I, -D, -U, -L, -l and -Wl options", "");
         return;
     }
@@ -367,7 +582,7 @@ static void add_opt(int kind, char *val)
 
 static void add_input(char *path)
 {
-    if (ninputs >= MAX_INPUTS) {
+    if (ninputs >= lim(MAX_INPUTS)) {
         error("too many input files", "");
         return;
     }
@@ -440,6 +655,12 @@ static void parse(void)
             nostdlib = 1;
         } else if (strcmp(a, "--index") == 0) {
             make_index = 1;
+        } else if (strcmp(a, "--lib") == 0) {
+            make_lib = 1;
+        } else if (strcmp(a, "--big-tables") == 0) {
+            if (BIG == 1)
+                error("--big-tables is for agonc on a PC: the Agon's tables are fixed", "");
+            big = 1;                    /* (main has already seen it on the command line) */
         } else if (strcmp(a, "-save-temps") == 0) {
             save_temps = 1;
         } else if (strcmp(a, "-v") == 0) {
@@ -484,22 +705,28 @@ static void cmd_start(void)
 {
     cmd_len = 0;
     cmd_n = 0;
+    cmd_agon = 0;
     cmd[0] = 0;
 }
 
 /* Appends one argument, a followed by b (so "-I" and a directory make
  * "-Idir", one word), space-separated from the one before. Words cannot
- * contain spaces: nothing quotes them, here or in the passes. */
+ * contain spaces: nothing quotes them, here or in the passes. The limit
+ * is on the length the Agon's string would have (agon_len, for a word
+ * with a path under $AGONC_ROOT in either part). */
 static void cmd_add(char *a, char *b)
 {
     int n;
+    int na;
 
     n = strlen(a) + strlen(b);
-    if (cmd_len + n + 1 >= CMD_SIZE) {
+    na = agon_len(a) + agon_len(b);
+    if (cmd_agon + na + 1 >= lim(CMD_SIZE) || cmd_len + n + 1 >= (int)sizeof cmd) {
         if (!failed)
             error("command too long for a pass", "");
         return;
     }
+    cmd_agon = cmd_agon + na + (cmd_len > 0);
     if (cmd_len > 0) {
         cmd[cmd_len] = ' ';
         cmd_len++;
@@ -544,7 +771,7 @@ static void show_time(char *name, unsigned cs)
  * is never given a response file; its command line is three words. */
 static int run(char *pass)
 {
-    char prog[PATH_SIZE];
+    char prog[PATH_BUF];
     char *rsp;
     int r;
     unsigned start;
@@ -626,13 +853,20 @@ static void compile(int n)
     char *name;
     char *ipath;
     char *irpath;
-    char spath[PATH_SIZE];
-    char buf[PATH_SIZE + 8];
+    char spath[PATH_BUF];
+    char buf[PATH_BUF + 16];
     int i;
+    int saved;
 
     in = inputs[n];
     name = file_part(in);
     ipath = in;
+    /* the link's .s first, so that the .i and .ir after it can be freed (untemp) */
+    if (!compile_only && !preprocess_only) {
+        s_path[n] = temp(tmp_dir, name, 1, ".s");
+        if (s_path[n] == NULL)
+            return;
+    }
     /* cpp, for a .c (a .i input is already preprocessed) */
     if (kinds[n] == K_C) {
         if (preprocess_only && out_path != NULL)
@@ -654,8 +888,10 @@ static void compile(int n)
             cmd_add(time_now, "");
         }
         if (root[0]) {                  /* cpp's own /usrlib and /lib/agonc are the Agon's */
+            saved = cmd_agon;           /* (words the Agon's command does not have) */
             cmd_add("-I", strcat(strcpy(buf, root), "/usrlib"));
             cmd_add("-I", strcat(strcpy(buf, root), "/lib/agonc"));
+            cmd_agon = saved;
         }
         add_warning_opts();
         writing = preprocess_only ? out_path : NULL;
@@ -680,11 +916,9 @@ static void compile(int n)
     if (!run("cc1"))
         return;
     /* cc2 */
-    if (!compile_only)
-        s_path[n] = temp(tmp_dir, name, 1, ".s");
-    else if (out_path != NULL)
+    if (compile_only && out_path != NULL)
         s_path[n] = out_path;
-    else
+    else if (compile_only)
         s_path[n] = join(spath, "", in, 1, ".s");      /* beside the input */
     if (s_path[n] == NULL)
         return;
@@ -694,16 +928,20 @@ static void compile(int n)
     if (optimize)
         cmd_add("-O", "");
     writing = compile_only ? s_path[n] : NULL;
-    run("cc2");
+    if (!run("cc2"))
+        return;
+    untemp(irpath);                     /* the newest temporary names, so freed */
+    if (kinds[n] == K_C)
+        untemp(ipath);
 }
 
 /* The first place -lname's libname.s is found: -L directories, then
  * /usrlib, /lib/agonc/agon and /lib/agonc. */
 static void add_library(char *name)
 {
-    char file[PATH_SIZE];
-    char dir[PATH_SIZE];
-    char path[PATH_SIZE];
+    char file[PATH_BUF];
+    char dir[PATH_BUF];
+    char path[PATH_BUF];
     int i;
     char *d;
     char *sep;
@@ -820,7 +1058,7 @@ static void check_image(char *asm_path, char *out)
     int bss;
     int size;
 
-    n = sys_read(asm_path, head, 256);
+    n = sys_read(asm_path, 0, head, 256);
     if (n <= 0)
         return;
     head[n] = 0;
@@ -958,8 +1196,28 @@ static void check_output(void)
         error(out_path, ": -E writes preprocessed C, so -o should end in .i, not a source file's extension");
     else if (compile_only && !preprocess_only && k != K_S)
         error(out_path, ": -c and -S write assembly, so -o should end in .s, not another source file's extension");
-    else if (!preprocess_only && !compile_only)
+    else if (!preprocess_only && !compile_only && !make_lib)
         error(out_path, ": the program would overwrite a source file (a program's name ends in .bin)");
+}
+
+/* --lib: the inputs' .s files (compiled, or given) joined into -o's .s,
+ * which ld then indexes beside it (object_format.md section 9): a library
+ * in one command, which MOS has no command to join files for. */
+static void lib_all(void)
+{
+    if (failed)
+        return;                         /* a compile failed and said why */
+    writing = out_path;
+    if (!sys_join(out_path, s_path, ninputs)) {
+        sys_remove(out_path);
+        error("cannot write ", out_path);
+        return;
+    }
+    writing = NULL;
+    cmd_start();
+    cmd_add("--index", "");
+    cmd_add(out_path, "");
+    run("ld");
 }
 
 /* --index: ld writes each library's index beside it (object_format.md
@@ -985,7 +1243,7 @@ static void index_all(void)
  * input's compile and the link. n counts the inputs that are compiled. */
 static void build(void)
 {
-    char dir[PATH_SIZE];
+    char dir[PATH_BUF];
     int i;
     int j;
     int n;
@@ -1009,6 +1267,15 @@ static void build(void)
         index_all();
         return;
     }
+    if (make_lib) {
+        if (preprocess_only || compile_only)
+            error("--lib does not go with -E, -c or -S: it compiles and joins", "");
+        else if (out_path == NULL || kind_of(out_path) != K_S)
+            error("--lib needs -o and the library's name, ending in .s (as -o libutil.s)", "");
+        for (i = 0; i < ninputs; i++)
+            if (kinds[i] == K_ASM)
+                error(inputs[i], ": --lib takes .c, .i and .s files");
+    }
     if ((preprocess_only || compile_only) && out_path != NULL && n > 1)
         error("-o with -E, -c or -S needs a single input", "");
     if (out_path != NULL)
@@ -1020,13 +1287,21 @@ static void build(void)
     if (join(dir, root, "/tmp/agonc", 0, "") == NULL)
         return;
     sys_mkdir(dir);
+    /* the passes' response-file names first, so that the newest names on
+     * the list are always the ones compile() frees */
+    temp(tmp_dir, "cpp", 0, ".rsp");
+    temp(tmp_dir, "cc1", 0, ".rsp");
+    temp(tmp_dir, "cc2", 0, ".rsp");
+    temp(tmp_dir, "ld", 0, ".rsp");
     for (i = 0; i < ninputs && !failed; i++) {
         if (kinds[i] == K_C || (kinds[i] == K_I && !preprocess_only))
             compile(i);
         else if (preprocess_only || compile_only)
             warning(inputs[i], ": input not used with -E, -c or -S");
     }
-    if (!preprocess_only && !compile_only)
+    if (make_lib)
+        lib_all();
+    else if (!preprocess_only && !compile_only)
         link_all();
 }
 
@@ -1051,12 +1326,16 @@ static void show_help(void)
     sys_out("  -nostdlib    no startup code and no C library\n");
     sys_out("  -save-temps  keep the intermediate files in /tmp/agonc\n");
     sys_out("  -Wl,--entry=sym  keep sym, and what it uses, in the link\n");
+    sys_out("  --lib        with -o libname.s: compile the inputs, join\n");
+    sys_out("               them into one library and index it\n");
     sys_out("  --index lib.s  index a library: links using it are faster\n");
+    sys_out("  --big-tables (on a PC) larger tables than the Agon's\n");
     sys_out("  -time        show each pass's time and the total\n");
     sys_out("  -v           show each pass's command line as well\n");
     sys_out("  --version    the compiler's version\n");
     sys_out("  -h, --help   this list\n");
     sys_out("  @file        read more arguments from file\n");
+    sys_out("File names may hold * and ? (as src/*.c), in @files too.\n");
 }
 
 /* The status is 0, 200 after any error, or 130 if Ctrl-C stopped the
@@ -1068,6 +1347,11 @@ int main(int argc, char **argv)
     unsigned start;
 
     sys_init(argv[0]);
+    /* --big-tables before the arguments are read in, so that its limits
+     * apply to them; parse() sees it again (and refuses it on the Agon) */
+    for (i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--big-tables") == 0 && BIG > 1)
+            big = 1;
     for (i = 1; i < argc; i++)
         expand(argv[i]);
     if (!failed)
@@ -1087,7 +1371,15 @@ int main(int argc, char **argv)
         error("no input files", " (agonc -h lists the options)");
         return 200;
     }
-    if (join(root, sys_root(), "", 0, "") == NULL || join(tmp_dir, root, "/tmp/agonc/", 0, "") == NULL)
+    /* the root, which the Agon does not have, does not count against its
+     * path limit (agon_len): only against the PC's longer buffers */
+    if (strlen(sys_root()) + 16 >= PATH_BUF) {
+        error("path too long: ", sys_root());
+        return 200;
+    }
+    strcpy(root, sys_root());
+    root_len = strlen(root);
+    if (join(tmp_dir, root, "/tmp/agonc/", 0, "") == NULL)
         return 200;
     start = sys_clock();
     sys_date(date_now, time_now);

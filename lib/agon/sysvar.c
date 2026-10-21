@@ -49,3 +49,22 @@ volatile unsigned char *getsysvar_rtc(void) { return MOS_SYSVAR->rtc; }
 unsigned int getsysvar_keydelay(void) { return MOS_SYSVAR->keydelay; }
 unsigned int getsysvar_keyrate(void) { return MOS_SYSVAR->keyrate; }
 int getsysvar_keyled(void) { return MOS_SYSVAR->keyled; }
+unsigned int getsysvar_mouseX(void) { return MOS_SYSVAR->mouse_x; }
+unsigned int getsysvar_mouseY(void) { return MOS_SYSVAR->mouse_y; }
+int getsysvar_mouseButtons(void) { return MOS_SYSVAR->mouse_buttons; }
+int getsysvar_mouseWheel(void) { return MOS_SYSVAR->mouse_wheel; }
+int getsysvar_mouseXDelta(void) { return MOS_SYSVAR->mouse_xdelta; }
+int getsysvar_mouseYDelta(void) { return MOS_SYSVAR->mouse_ydelta; }
+
+/* AgonDev's waitvblank: MOS advances its clock at each vertical blank, so
+ * the next change of the clock's low byte is the next frame. */
+void waitvblank(void)
+{
+    volatile unsigned char *t;
+    unsigned char then;
+
+    t = (volatile unsigned char *)&MOS_SYSVAR->time;
+    then = *t;
+    while (*t == then)
+        ;
+}

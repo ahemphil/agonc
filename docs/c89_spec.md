@@ -24,7 +24,8 @@ agonc has two modes.
 | trigraphs (`??=` …) | not recognised, with a warning where one appears | recognised, as C89 requires |
 | implicit `int` (`static x;`, `f() {…}`, an undeclared K&R parameter) | accepted, with a warning at each | accepted, as C89 requires, with a warning at each |
 | implicit function declarations (calling an undeclared function) | **errors**, as in current GCC and Clang | accepted, as C89 requires, with a warning at each |
-| a comma after the last enumerator, non-constant initialisers for local aggregates (a struct value for a member among them), `#warning` (C99 and later) | accepted | errors, as C89 requires |
+| a comma after the last enumerator, non-constant initialisers for local aggregates (a struct value for a member among them, a bit-field among them), `#warning`, `static` and qualifiers in a parameter's array brackets (C99 and later; the qualifiers go to the pointer the parameter becomes) | accepted | errors, as C89 requires |
+| `return` with a void expression in a void function (C forbids it; GCC allows it) | accepted, with a warning: the expression is evaluated, and the function returns | an error |
 | `long long` and `unsigned long long`, the `LL` and `ULL` suffixes (C99) | accepted (§13) | errors, as C89 requires |
 | a declaration in `for`, `_Bool`, `inline`, `restrict`, flexible array members, hexadecimal floating constants, variadic macros and `_Pragma` (C99) | accepted (§13) | errors, as C89 requires (`_Bool`, `inline` and `restrict` are ordinary identifiers) |
 | `strtod`, `atof` and the `scanf` family | read C99's hexadecimal, `inf` and `nan` forms too (§15) | read C89's forms only, as C89 requires |
@@ -128,6 +129,9 @@ diagnostic).
 - `/` truncates toward zero; `%` has the sign of the dividend.
 - `>>` of a negative signed value is arithmetic (sign bits shift in).
 - Signed overflow wraps. C89 leaves it undefined; agonc defines it.
+  In a constant expression, where C89 requires a diagnostic, cc1 warns
+  (`integer overflow in a constant expression`) and keeps the wrapped
+  value.
 - An unsuffixed decimal constant has the first of `int`, `long`, `unsigned
   long` that holds it; an unsuffixed octal or hexadecimal constant the first
   of `int`, `unsigned int`, `long`, `unsigned long`; with `u`, `l` or both,
@@ -193,7 +197,9 @@ diagnostic).
   fields are allocated from the least significant bit; one of 8 bits or
   fewer never crosses a byte boundary; a wider one (up to 24 bits) starts at
   a byte boundary; a zero-width one moves to the next byte.
-- An **enumeration** type is `int`; its constants are `int`.
+- An **enumeration** type is `int`; its constants are `int`, and a value
+  outside `int`'s range (-8388608 to 8388607), given or counted up to,
+  is an error.
 - A **flexible array member** (default mode) is at the offset the members
   before it end at, which is the structure's size: it adds nothing.
 
@@ -259,7 +265,7 @@ the compiler.
 | nesting of `#include` | 8 | 8 |
 | `case` labels in a `switch` | 257 | 300 (in a whole function) |
 | members of a structure or union | 127 | 127 (and 800 in all structures together) |
-| enumeration constants in an enumeration | 127 | 127 |
+| enumeration constants in an enumeration | 127 | 1,023 (C99's minimum) |
 | nesting of structure or union definitions | 15 | ≥ 15 |
 | items of an initialiser held at once (C99: for a designator going back, a compound literal, or a local aggregate with values that are not constants) | — | 512, with 4,096 bytes of strings |
 
@@ -377,7 +383,9 @@ mode (§1).
     implementation's in C89. `__STDC_VERSION__` is `199901L` in the
     default mode, with C11's `__STDC_NO_VLA__` and `__STDC_NO_COMPLEX__`
     1 to say what is absent, and `__STDC_HOSTED__` 1; strict mode defines
-    none of them.
+    none of them. C99's wide-character library (`<wchar.h>`, `<wctype.h>`)
+    is absent too, which no standard macro can say: including either is
+    an error (no such file).
 17. **C99's library additions**, in the default mode: `snprintf`,
     `vsnprintf`, `vscanf`, `vfscanf`, `vsscanf`, `strtof`, `strtold`,
     `_Exit`, `isblank`, `va_copy`, `<inttypes.h>`'s `imaxabs`, `imaxdiv`,
@@ -410,11 +418,15 @@ required diagnostics, and the translation limits. Every remaining
 deviation from C89 is listed in this section; there are none known.
 
 Every usable C89 test passes in strict mode:
-c-testsuite 137 of 137, GCC 577 of 577, SDCC 644 of 644 files. In the
-default mode what fails needs a feature agonc does not provide (GCC's
-extended `asm`, statement expressions, variable-length arrays, calls to
-undeclared functions) or makes a host's assumption. (The default-mode
-figures predate C99 phases 1 and 2, which may let more tests pass.)
+c-testsuite 137 of 137, GCC 577 of 577, SDCC 644 of 644 files. The tests
+that are not C89 run in the default mode, judged by what they use as the
+default mode sees them (`__STDC_VERSION__` 199901L), and skipped only for
+a part of C99 the default mode lacks: c-testsuite 44 of 46 pass, GCC 581
+of 669, SDCC 627 of 637 files (2026-10-10). What fails needs a feature
+agonc does not provide (GCC's extended `asm`, statement expressions,
+empty structures, initialised flexible array members, the old
+`member: value` designators, calls to undeclared functions) or a table
+larger than agonc's.
 
 ## 15. The library (G.3.14)
 
@@ -558,5 +570,6 @@ calls of MOS 2.3.3, its FatFS calls, the system variables, keyboard and
 interrupt handlers), `<agon/uart.h>` (the second serial port, UART1:
 `uart_open`, `uart_close`, `uart_getc`, `uart_putc`, `uart_write`) and
 `<agon/vdp.h>` (every documented VDU command: text, graphics, bitmaps
-and sprites, audio, the buffered command API, and the system commands).
-The headers are their reference.
+and sprites, audio, the buffered command API, and the system commands),
+and AgonDev's `<agon/keyboard.h>`, `<agon/gpio.h>`, `<agon/joystick.h>`,
+`<agon/timer.h>` and `<ez80f92.h>`. The headers are their reference.

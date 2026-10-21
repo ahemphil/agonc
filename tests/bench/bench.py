@@ -1,6 +1,6 @@
 """The benchmarks: the speed and size of the code agonc generates.
 
-    bench.py [-O0] [--fast] [--out FILE] [--save-baseline] [--only NAME...]
+    bench.py [-O0] [--fast] [--tree DIR] [--out FILE] [--save-baseline] [--only NAME...]
 
 Each tests/bench/<name>.c is built on the PC (HOSTCC, -DBENCH_HOST) and run
 there for its checksum, then built by the host driver for the Agon (make
@@ -12,7 +12,9 @@ missing time means a wrong answer or a crash.
 
 The report gives each benchmark's time and code size, and the change from
 tests/bench/baseline.json (--save-baseline records the current figures
-there). -O0 builds without the optimiser; --fast runs the emulator unthrottled,
+there). -O0 builds without the optimiser; --tree DIR builds with another
+tree's compiler and libraries (DIR/build/host and DIR/build/agon: tested/,
+say, for a before and after); --fast runs the emulator unthrottled,
 whose clock then follows the PC's, so only proportions count (baselines
 are for one mode). A measurement, not a test: outside make check. Run from
 PowerShell (BUILDING.md section 11), with nothing else using the emulator.
@@ -22,7 +24,7 @@ import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "tests", "tools"))
-from common import AGON, HOSTCC, PY, RUN_EMULATOR, host, host_env  # noqa: E402
+from common import AGON, EXE, HOSTCC, PY, RUN_EMULATOR, host, host_env  # noqa: E402
 
 OUT = os.path.join("build", "bench")
 BASELINE = os.path.join(HERE, "baseline.json")
@@ -42,6 +44,9 @@ def names(args):
     return all_names
 
 
+AGONC, ROOT = host("agonc"), AGON     # --tree changes them
+
+
 def build(name, flags=()):
     """PC checksum, then the Agon binary; returns (checksum, size) or a problem string."""
     src = os.path.join("tests", "bench", name + ".c")
@@ -54,14 +59,19 @@ def build(name, flags=()):
         return f"{name}: the PC's run failed: {r.stdout.strip()[:100]}"
     want = int(r.stdout.strip())
     out = os.path.join(OUT, name + ".bin")
-    r = sh([host("agonc")] + list(flags) + [f"-DWANT={want}UL", "-o", out, src], env=host_env(AGON))
+    r = sh([AGONC] + list(flags) + [f"-DWANT={want}UL", "-o", out, src], env=host_env(ROOT))
     if r.returncode:
         return f"{name}: agonc failed: {(r.stderr or r.stdout).strip()[:300]}"
     return want, os.path.getsize(os.path.join(REPO, out))
 
 
 def main():
+    global AGONC, ROOT
     args = sys.argv[1:]
+    if "--tree" in args:
+        tree = os.path.relpath(os.path.abspath(args[args.index("--tree") + 1]), REPO)  # the driver takes only short paths
+        AGONC = os.path.join(tree, "build", "host", "agonc" + EXE)
+        ROOT = os.path.join(tree, "build", "agon")
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
     if not os.path.exists(os.path.join(REPO, DONE)):
         sys.exit("bench: build the test runtime first (any emulator suite, e.g. tests/libc_c)")

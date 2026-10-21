@@ -4,7 +4,10 @@ Three headers give a C program the rest of the machine: `<agon/mos.h>` for
 MOS (files, the clock, the keyboard, the system variables, the FatFS calls,
 keyboard and interrupt handlers), `<agon/uart.h>` for the second serial
 port, and `<agon/vdp.h>` for the VDP, which owns the screen, sound,
-keyboard and mouse. None of them is part of standard C, and all of them work in
+keyboard and mouse. Four smaller ones follow AgonDev's: `<agon/keyboard.h>`
+(a queue of key events), `<agon/gpio.h>`, `<agon/joystick.h>` and
+`<agon/timer.h>` (the eZ80's own ports, the joysticks and a delay). None of
+them is part of standard C, and all of them work in
 both language modes. This chapter is a reference: one table per area, with
 prose only where something needs explaining. What the VDP or MOS does with
 a command is left to the Agon documentation, linked from each section; the
@@ -12,7 +15,10 @@ tables say what each function sends or calls.
 
 The headers themselves are commented and remain the final word on argument
 order and ranges: [`mos.h`](../../lib/agon/mos.h),
-[`uart.h`](../../lib/agon/uart.h) and [`vdp.h`](../../lib/agon/vdp.h).
+[`uart.h`](../../lib/agon/uart.h), [`vdp.h`](../../lib/agon/vdp.h),
+[`keyboard.h`](../../lib/agon/keyboard.h), [`gpio.h`](../../lib/agon/gpio.h),
+[`joystick.h`](../../lib/agon/joystick.h) and
+[`timer.h`](../../lib/agon/timer.h).
 
 ## How the library works
 
@@ -22,9 +28,18 @@ order and ranges: [`mos.h`](../../lib/agon/mos.h),
 #include <agon/mos.h>      /* MOS calls, FatFS, system variables, handlers */
 #include <agon/uart.h>     /* UART1 */
 #include <agon/vdp.h>      /* VDU commands */
+#include <agon/keyboard.h> /* key events, queued */
+#include <agon/gpio.h>     /* the eZ80's ports and GPIO pins */
+#include <agon/joystick.h> /* the joysticks */
+#include <agon/timer.h>    /* delay */
 ```
 
-The headers live in `/lib/agonc/agon`. Nothing needs to be named on the command
+The headers live in `/lib/agonc/agon`; `<ez80f92.h>`, the eZ80's internal
+registers by name, is in `/lib/agonc` with the C library's headers.
+AgonDev's deprecated names for AgDev's headers are kept the way AgonDev
+keeps them, as forwards that warn: `<mos_api.h>` includes `<agon/mos.h>`,
+and `<agon/vdp_vdu.h>` includes `<agon/vdp.h>` (under `-ansi`, whose C89
+has no `#warning`, they include them without a word). Nothing needs to be named on the command
 line to use them. The few MOS calls the C library itself relies on (opening,
 reading, writing, seeking, testing and closing files by handle, deleting,
 renaming, making directories, a file's size, loading, waiting for a key, the
@@ -141,11 +156,17 @@ system variables, so only one of them should be outstanding at a time.
 
 ### Names
 
-Where AgDev has a call, the function has AgDev's name and argument order
-(AgDev's `agon/vdp_vdu.h` and `mos_api.h`), so most programs written for
-AgDev's Agon headers build unchanged; AgDev's misspelt
-`vdp_keyboard_cotrol` is kept beside `vdp_keyboard_control`, and the
-system variables have AgDev's `getsysvar_` readers. The rest follow the
+The names follow [AgonDev](https://github.com/AgonPlatform/agondev)'s
+`<agon/mos.h>` and `<agon/vdp.h>` (release v0.22), the toolchain most
+Agon programs come from, and through it AgDev's, its predecessor: where
+AgonDev has a call that MOS 2.3.3 provides, agonc's has its name and
+argument order (with `int` where AgonDev has `uint8_t`), so most programs
+written for AgonDev or AgDev build unchanged. AgDev's misspelt
+`vdp_keyboard_cotrol` is kept beside `vdp_keyboard_control`, AgonDev's
+`syscar_audioSuccess` beside `sysvar_audioSuccess`, and the system
+variables have AgonDev's `getsysvar_` readers, its `sysvar_` offsets and
+its `SYSVAR` structure. AgonDev's calls that only MOS 3 has are left
+out. The rest follow the
 same pattern: `vdp_` and a description for a VDU command, `vdp_adv_` for
 the buffered API and the 16-bit bitmap commands, `vdp_audio_` for sound,
 `mos_` for a MOS call, `ffs_` for a FatFS call. Alongside them are short
@@ -156,9 +177,12 @@ AgDev's; `vdp_colour`, `vdp_tab`, `vdp_cursor`, `vdp_move` and `vdp_draw`
 have AgDev-style twins that send the same bytes (`vdp_set_text_colour`,
 `vdp_cursor_tab`, `vdp_cursor_enable`, `vdp_move_to`, `vdp_line_to`).
 
-A few functions deliberately differ from AgDev: `vdp_triangle`,
-`vdp_circle` and `vdp_circle_radius` send PLOT codes that draw, where
-AgDev's send the matching "move" codes, which draw nothing. [Porting from
+`vdp_triangle` and `vdp_circle` take AgonDev's arguments, the three
+corners and the centre and radius, and draw outlines; their filled
+forms are `vdp_filled_triangle` and `vdp_filled_circle`. AgDev's took the
+last points plotted and sent "move" codes, which draw nothing.
+`vdp_circle_radius`, by AgDev's name, sends PLOT 145, which draws, where
+AgDev's sent 144. [Porting from AgonDev and
 AgDev](07-porting-from-agdev.md) lists the differences that matter when
 moving a program across.
 
@@ -275,7 +299,12 @@ check for the destination with `mos_fopen` before renaming.
 |---|---|---|
 | `mos_getkey()` | 0x00 | waits for a key; returns its ASCII code |
 | `mos_editline(buf, size, flags)` | 0x09 | MOS's line editor on `buf`; returns 13 or 27 |
-| `mos_oscli(cmd)` | 0x10 | runs a command line as if typed at the prompt |
+| `mos_oscli(cmd, argv, argc)` | 0x10 | runs a command line as if typed at the prompt |
+| `getch()` | 0x00 | `mos_getkey` by AgonDev's name |
+| `mos_puts(buf, n, delim)` | RST 18h | `n` bytes of `buf` to the VDP; with `n` 0, those before the first `delim` |
+| `mos_putstring(s)` | RST 18h | a string to the VDP |
+| `putch(c)` | RST 10h | one byte to the VDP; returns `c` |
+| `waitvblank()` | none | waits for the next vertical blank (the clock's next tick) |
 | `mos_getError(code, buf, size)` | 0x0F | the message for a status code, into `buf` |
 | `mos_getrtc(buf)` | 0x12 | the clock as text; returns its length |
 | `mos_setrtc(t)` | 0x13 | sets the clock from six bytes |
@@ -293,7 +322,9 @@ MOS 2.2 or later.
 
 `mos_oscli` returns MOS's status for the command. It runs MOS's built-in
 commands and moslets, but not a program from `/bin`, which would be loaded
-over the program that called it; the same is true of `system`.
+over the program that called it; the same is true of `system`. Its
+`argv` and `argc`, AgonDev's form, go to MOS in BC and DE, which MOS
+2.3.3 does not use: pass `NULL` and 0.
 
 `mos_getrtc` writes text of the form `Sun, 27/09/2026 10:54:26` into a
 buffer of at least 32 bytes, and refreshes the clock bytes in the system
@@ -322,6 +353,7 @@ are MOS's calls as they are.
 | `mos_uopen(settings)` | 0x15 | opens UART1 with a `struct mos_uart`; returns the status |
 | `mos_uclose()` | 0x16 | closes UART1 |
 | `mos_ugetc()` | 0x17 | waits for a byte (0 to 255); -1 if the port is closed |
+| `mos_ugetc_nb()` | none | a byte if one has arrived, else -1 at once (UART1's registers, read directly) |
 | `mos_uputc(c)` | 0x18 | sends a byte; 1 if sent, 0 if not |
 | `mos_i2c_open(freq)` | 0x1F | starts the I2C bus as master |
 | `mos_i2c_close()` | 0x20 | stops it |
@@ -352,20 +384,20 @@ documents each call.
 |---|---|---|
 | `ffs_fopen(fp, path, mode)` | 0x80 | opens a file into `*fp`; `mode` as `mos_fopen` |
 | `ffs_fclose(fp)` | 0x81 | closes it |
-| `ffs_fread(fp, buf, n, done)` | 0x82 | reads up to `n` bytes |
-| `ffs_fwrite(fp, buf, n, done)` | 0x83 | writes `n` bytes |
+| `ffs_fread(fp, buf, n)` | 0x82 | reads up to `n` bytes; returns how many |
+| `ffs_fwrite(fp, buf, n)` | 0x83 | writes `n` bytes; returns how many |
 | `ffs_flseek(fp, off)` | 0x84 | moves to byte `off` (an `unsigned long`) from the start |
 | `ffs_ftruncate(fp)` | 0x85 | ends the file at the current position |
 | `ffs_feof(fp)` | 0x8E | 1 at the end of the file, else 0 |
-| `ffs_stat(path, info)` | 0x96 | a file's details into `*info` |
+| `ffs_stat(info, path)` | 0x96 | a file's details into `*info` |
 | `ffs_dopen(dp, path)` | 0x91 | opens a directory into `*dp` |
 | `ffs_dclose(dp)` | 0x92 | closes it |
 | `ffs_dread(dp, info)` | 0x93 | the next directory entry into `*info` |
 | `ffs_getcwd(buf, size)` | 0x9E | the current directory's path into `buf` |
 
-`ffs_fread` and `ffs_fwrite` store the number of bytes transferred in
-`*done` when `done` is not null; it falls short at the end of the file or
-when the disk is full. `ffs_dread` signals the end of the directory with
+`ffs_fread` and `ffs_fwrite` return the number of bytes transferred, as
+AgonDev's do: it falls short at the end of the file or when the disk is
+full. (MOS's status for the call is not returned.) `ffs_dread` signals the end of the directory with
 `FR_OK` and an empty `info->fname`. A `FIL` from `mos_getfil` lets these
 calls work on a file opened with `mos_fopen`.
 
@@ -479,12 +511,12 @@ one; each reader returns the field as an `int`, `unsigned int` or
 | 0x26 | `keyled` | `keyled` | the keyboard lights |
 | 0x27 | `scr_mode` | | the screen mode |
 | 0x28 | `rtc_enable` | | |
-| 0x29 | `mouse_x` | | the mouse position, when enabled |
-| 0x2B | `mouse_y` | | |
-| 0x2D | `mouse_buttons` | | |
-| 0x2E | `mouse_wheel` | | (`signed char`) |
-| 0x2F | `mouse_xdelta` | | the mouse's x movement (`short`) |
-| 0x31 | `mouse_ydelta` | | |
+| 0x29 | `mouse_x` | `mouseX` | the mouse position, when enabled |
+| 0x2B | `mouse_y` | `mouseY` | |
+| 0x2D | `mouse_buttons` | `mouseButtons` | |
+| 0x2E | `mouse_wheel` | `mouseWheel` | (`signed char`) |
+| 0x2F | `mouse_xdelta` | `mouseXDelta` | the mouse's x movement (`short`) |
+| 0x31 | `mouse_ydelta` | `mouseYDelta` | |
 | 0x37 | `gp` | | the general poll's echo |
 
 The bytes at 0x20 (`spare`) and 0x33 (`reserved`) are unused. The
@@ -495,6 +527,15 @@ reorders them into 0xRRGGBB. `getsysvar_rtc` returns a pointer to the six
 clock bytes. The [system variables
 table](https://agonplatform.github.io/agon-docs/mos/API/#sysvars) in the
 MOS documentation describes each field.
+
+AgonDev's ways to the same block work too: its offsets, `sysvar_`
+followed by its field names (`mos_sysvars()[sysvar_cursorX]`, with the
+VDP reply flags as `vdp_pflag_mode` and the rest), and its `SYSVAR`
+structure, field for field in its spelling (`cursorX`, `scrWidth`,
+`mouseXDelta` ...), through `sys_vars`, which points at the block as
+AgonDev's start-up code sets it up to: `sys_vars->scrCols`. Its `scrpixel`
+is one 24-bit value, red lowest: AgonDev's three byte names for it need
+C11's anonymous structures.
 
 ### Keyboard and interrupt handlers
 
@@ -587,6 +628,45 @@ save what it uses and end with EI and RETI.L. `mos_setintvector` returns
 the vector's previous handler, which the program must put back itself
 before it ends: unlike the slots above, nothing restores it.
 
+### Key events: agon/keyboard.h
+
+`<agon/keyboard.h>` is AgonDev's queue of key events, built on the key
+handler above: the handler stores each packet, and the program takes them
+out in the order they came, when it is ready.
+
+| Function | What it does |
+|---|---|
+| `kbuf_init(n)` | starts a queue of `n` events (1 to 254); outside that, or without the memory, there is no queue |
+| `kbuf_poll_event(&e)` | 1 with the oldest event in `e`, or 0 if there is none |
+| `kbuf_clear()` | drops the events waiting |
+| `kbuf_deinit()` | removes the queue and its key handler |
+
+An event, `struct keyboard_event_t`, is the packet by name: `ascii`,
+`kmod` (the modifiers), `vkey` (the FabGL virtual key code) and `isdown`
+(1 down, 0 up), as in the table above. A full queue drops the newest
+events. The queue is the program's one key handler: `kbuf_init` replaces
+a handler set with `mos_set_key_handler`, and setting one replaces the
+queue's (whose events then stop). Calling `kbuf_init` again starts a new,
+empty queue; the program's end removes the handler, however it ends.
+
+```c
+#include <stdio.h>
+#include <agon/keyboard.h>
+
+struct keyboard_event_t e;
+
+kbuf_init(16);
+for (;;) {
+    if (kbuf_poll_event(&e) && e.isdown) {
+        if (e.ascii == 27)
+            break;
+        printf("key %d\r\n", e.vkey);
+    }
+    /* ... the rest of the game's frame ... */
+}
+kbuf_deinit();
+```
+
 ## The serial port: agon/uart.h
 
 UART0 is MOS's link to the VDP; UART1 is free for the program, for a
@@ -616,6 +696,62 @@ uart_write("HELLO\r\n", 7);
 uart_close();
 ```
 
+## The eZ80's own hardware
+
+These headers follow AgonDev's (v0.22). They reach the eZ80's internal
+registers directly, not through MOS, so a program using them can upset
+what MOS relies on: port B carries the VDP's interrupt line and port D
+UART0, MOS's link to the VDP; port C, the user port, is the program's.
+
+### Ports and pins: agon/gpio.h and ez80f92.h
+
+`<ez80f92.h>` names the eZ80F92's internal registers by their port
+addresses, as Zilog's manual does: `PB_DR`, `PC_DDR`, `TMR0_CTL`,
+`UART0_LSR` and the rest. `<agon/gpio.h>` includes it.
+
+| Function | What it does |
+|---|---|
+| `io_in(port)` | reads an internal register (0 to 255) |
+| `io_out(port, value)` | writes one |
+| `outputMode(port, pin)`, `inputMode(port, pin)` | makes a pin (0 to 7) an output or an input |
+| `outputHigh(port, pin)`, `outputLow(port, pin)` | sets an output pin high or low |
+| `input(port, pin)` | 1 if the pin reads high, else 0 |
+| `inputPort(port)` | the whole port's pins |
+| `outputModePinID(id)`, `inputModePinID(id)` | the same by pin name |
+| `outputHighPinID(id)`, `outputLowPinID(id)` | |
+| `inputPinID(id)` | 1 if the pin reads high, else 0 |
+
+`port` is `PORTB`, `PORTC` or `PORTD` (the ports' data registers); the pin
+names, `PB0` to `PD7`, carry their port with them. A pin outside 0 to 7
+changes nothing and reads 0. A pin's mode is set by its port's data
+direction register, the one after the data register: a set bit is an
+input. The ports' alternate-function registers are left as they are.
+
+```c
+#include <agon/gpio.h>
+
+outputModePinID(PC0);
+outputHighPinID(PC0);       /* pin 0 of the user port high */
+```
+
+### The joysticks: agon/joystick.h
+
+| Function | What it does |
+|---|---|
+| `getJoystickButtons()` | port C in the low byte, port D in the high one |
+| `resetJoysticks()` | makes the joystick pins inputs: all of port C, and port D's top four |
+
+The macros take what `getJoystickButtons` returned and give 1 while a
+switch is closed: `joystick1_UP(b)` and `joystick2_UP(b)`, the same for
+`DOWN`, `LEFT` and `RIGHT`, and `joystick1_BUTTON1(b)` to
+`joystick2_BUTTON2(b)`.
+
+### A delay: agon/timer.h
+
+`delay(ms)` waits `ms` milliseconds, timed by the eZ80's timer 0, which
+it takes over while it waits. A Ctrl-C ends it between milliseconds (see
+[Ctrl-C](#ctrl-c)).
+
 ## VDU commands: agon/vdp.h
 
 `<agon/vdp.h>` has a function for every command the VDP documentation
@@ -628,7 +764,7 @@ return nothing unless the table says otherwise.
 |---|---|
 | `vdu(c)` | the byte `c` |
 | `vdu_n(p, n)` | `n` bytes from `p` (a `const char *`); nothing if `n` is 0 or less |
-| `vdp_mode(m)` | VDU 22, m: screen mode `m` |
+| `vdp_mode(m)` | VDU 22, m: screen mode `m`; returns `m`, or -1 (nothing sent) outside 0 to 254 |
 | `vdp_cls()` | VDU 12: clear the text area |
 | `vdp_clg()` | VDU 16: clear the graphics area |
 | `vdp_colour(c)` | VDU 17, c: text colour; 128 + c for the background |
@@ -713,10 +849,36 @@ choose the shape.
 | `vdp_move_to(x, y)` | PLOT 4: move |
 | `vdp_line_to(x, y)` | PLOT 5: a line from the last point |
 | `vdp_point(x, y)` | PLOT 69: a point |
-| `vdp_triangle(x, y)` | PLOT 85: a filled triangle with the last two points |
 | `vdp_filled_rect(x, y)` | PLOT 101: a filled rectangle from the last point |
 | `vdp_circle_radius(x, y)` | PLOT 145: a circle about the last point, radius `x`, `y` away |
-| `vdp_circle(x, y)` | PLOT 149: a circle about the last point, through `x`, `y` |
+| `vdp_dotdash_line_to(x, y)` | PLOT 21: a dotted or dashed line from the last point |
+| `vdp_plot_bitmap(x, y)` | PLOT 237: the selected bitmap at `x`, `y` |
+| `vdp_line_fill_leftright_to_fg(x, y)` | PLOT 109: a line fill left and right to the foreground colour |
+| `vdp_line_fill_leftright_to_nonbg(x, y)` | PLOT 77: left and right to anything but the background |
+| `vdp_line_fill_right_to_bg(x, y)` | PLOT 93: right to the background |
+| `vdp_line_fill_right_to_nonfg(x, y)` | PLOT 125: right to anything but the foreground |
+
+AgonDev's shapes are drawn whole, from their corners, which they visit
+with PLOT 4 first:
+
+| Function | Draws |
+|---|---|
+| `vdp_line(x1, y1, x2, y2)` | a line |
+| `vdp_dotdash_line(x1, y1, x2, y2)` | a dotted or dashed line (PLOT 21) |
+| `vdp_rectangle(x1, y1, x2, y2)` | a rectangle's outline (four lines) |
+| `vdp_triangle(x1, y1, x2, y2, x3, y3)` | a triangle's outline |
+| `vdp_parallelogram(x1, y1, x2, y2, x3, y3)` | a parallelogram's outline, its fourth corner `x1 + x3 - x2`, `y1 + y3 - y2` |
+| `vdp_circle(x, y, r)` | a circle's outline about `x`, `y` (PLOT 148, then 145) |
+| `vdp_filled_rectangle(x1, y1, x2, y2)` | filled (PLOT 101) |
+| `vdp_filled_triangle(x1, y1, x2, y2, x3, y3)` | filled (PLOT 85) |
+| `vdp_filled_parallelogram(x1, y1, x2, y2, x3, y3)` | filled (PLOT 117) |
+| `vdp_filled_circle(x, y, r)` | filled (PLOT 156, then 153) |
+| `vdp_arc(cx, cy, x1, y1, x2, y2)` | an arc about `cx`, `cy` from `x1`, `y1` to `x2`, `y2` (PLOT 165) |
+| `vdp_segment(cx, cy, x1, y1, x2, y2)` | a filled segment (PLOT 173) |
+| `vdp_sector(cx, cy, x1, y1, x2, y2)` | a filled sector (PLOT 181) |
+| `vdp_copy_rectangle(x1, y1, x2, y2, dx, dy)` | copies the rectangle to `dx`, `dy` (PLOT 191) |
+| `vdp_move_rectangle(x1, y1, x2, y2, dx, dy)` | moves it (PLOT 189) |
+| `vdp_fill_path(path, size)` | a filled shape through the points in `path`, an array of `x`, `y` pairs, `size` its size in bytes (`sizeof path`), at least three points (PLOT 221) |
 
 `vdp_draw_bitmap` aside, PLOT codes &E8 to &EF draw the selected bitmap and
 respect the viewports; send them with `vdp_plot`.
@@ -877,7 +1039,7 @@ page covers them.
 | `vdp_select_bitmap(n)` | 0, n |
 | `vdp_load_bitmap(w, h, data)` | 1, w; h;, then w * h * 4 bytes of pixels |
 | `vdp_load_bitmap_file(name, w, h)` | the same, the pixels read from a file |
-| `vdp_capture_bitmap(n)` | 1, n, 0, 0;: the screen between the last two points (2.2.0) |
+| `vdp_capture_bitmap(top, left, bottom, right, n)` | the two corners as moves, then 1, n, 0, 0;: that part of the screen into bitmap `n` (2.2.0) |
 | `vdp_solid_bitmap(w, h, r, g, b, a)` | 2, w; h; r, g, b, a: one colour |
 | `vdp_draw_bitmap(x, y)` | 3, x; y;: at pixel `x`, `y`, its top left corner |
 | `vdp_adv_select_bitmap(buffer)` | &20, buffer; |
@@ -972,10 +1134,10 @@ describes the commands, the envelopes and the sample formats.
 | `vdp_audio_set_buffer_repeat_length(ch, buffer, len)` | 5, 8, buffer; len (24 bits) |
 | `vdp_audio_volume_envelope_disable(ch)` | 6, 0 |
 | `vdp_audio_volume_envelope_ADSR(ch, a, d, s, r)` | 6, 1, a; d; s, r; |
-| `vdp_audio_volume_envelope_multiphase_ADSR(ch)` | 6, 2 only; the rest by `vdu_n` |
+| `vdp_audio_volume_envelope_multiphase_ADSR(ch, na, ns, nr, data)` | 6, 2, then `na` attack, `ns` sustain and `nr` release phases from `data`, a `short` level and duration for each |
 | `vdp_audio_volume_envelope_multiphase(ch, data, n)` | 6, 2, then `n` bytes (2.5.0) |
 | `vdp_audio_frequency_envelope_disable(ch)` | 7, 0 |
-| `vdp_audio_frequency_envelope_stepped(ch, np, ctl, len)` | 7, 1, np, ctl, len; then the phases by `vdu_n` |
+| `vdp_audio_frequency_envelope_stepped(ch, np, ctl, len, data)` | 7, 1, np, ctl, len, then `np` phases from `data`, a `short` adjustment and step count each |
 | `vdp_audio_frequency_envelope(ch, ctl, len, phases, np)` | the whole stepped envelope |
 | `vdp_audio_enable_channel(ch)` | 8 |
 | `vdp_audio_disable_channel(ch)` | 9 |
@@ -1198,3 +1360,37 @@ offsets `xo`, `yo`. A map `size` is 0 to 8 for 32x32, 32x64, 32x128,
 640x240, 320x240 and 320x200 screen modes. In a map entry, `attr` bit 0
 flips the tile horizontally, bit 1 vertically, and bits 2 and 3 choose the
 bank; for `vdp_tile_draw`, bits 0 and 1 are the flips.
+
+### AgonDev's other calls
+
+AgonDev's `<agon/vdp.h>` (v0.22) has these besides the shapes under
+[PLOT](#plot); each sends what AgonDev's sends.
+
+| Function | Sends, or does |
+|---|---|
+| `vdp_set_graphics_fg_colour(mode, c)` | VDU 18, mode, c |
+| `vdp_set_graphics_bg_colour(mode, c)` | VDU 18, mode, c + 128 |
+| `vdp_set_text_bg_colour(c)` | VDU 17, c + 128 |
+| `vdp_outchar(c)` | VDU 27, c: `c` as a character, whatever its code |
+| `vdp_set_logical_coordinates()` | VDU 23, 0, &C0, 1 |
+| `vdp_set_pixel_coordinates()` | VDU 23, 0, &C0, 0 |
+| `vdp_set_dotdash_line_pattern(b0, ..., b7)` | VDU 23, 6 and the pattern's eight bytes |
+| `vdp_set_dotdash_pattern_length(n)` | VDU 23, 0, &F2, n; nothing for `n` over 64 |
+| `vdp_set_hardware_sprite()` | VDU 23, 27, 19 |
+| `vdp_set_software_sprite()` | VDU 23, 27, 20 |
+| `vdp_mouse_set_bitmap(hx, hy)` | VDU 23, 27, &40, hx, hy: the current bitmap as the mouse cursor |
+| `vdp_audio_play_sample(ch, vol)` | command 0 with frequency and duration 0: the channel's sample |
+| `vdp_copper_enable()`, `vdp_copper_disable()` | VDU 23, 0, &F8 and &F9 on VDP variable &310 |
+| `vdp_load_sprite_bitmaps(prefix, format, w, h, num, first)` | loads `num` frames of `w` by `h` RGBA8888 pixels into bitmaps from `first` on, each from the file named by `sprintf(name, format, prefix, i)` (at most 31 characters); returns how many |
+| `vdp_adv_load_sprite_bitmaps(...)` | the same into buffers (`vdp_adv_select_bitmap`) |
+| `vdp_getKeyCode()` | the ASCII code of the key held now, 0 if none (the system variables) |
+| `vdp_getKeyMap(i)` | byte `i` of MOS's keyboard map |
+| `vdp_waitKeyDown()`, `vdp_waitKeyUp()` | wait for a key to go down, or for every key to be up |
+| `vdp_vdu_init()` | `sys_vars` (AgonDev's start-up step; nothing to do here) |
+
+Its macros are here too: `VDP_PUTS(s)`, which sends a structure of bytes
+as it is (`vdu_n((const char *)&s, sizeof s)`), `BACKGROUND_COL_OFFSET`
+(128), `LOAD_BMAP_BLOCK` (65535) and the paint modes for `vdp_gcol`,
+`GCOLMODE_COLOUR`, `GCOLMODE_OR`, `GCOLMODE_AND`, `GCOLMODE_EOR`,
+`GCOLMODE_INVERT`, `GCOLMODE_NOP`, `GCOLMODE_AND_INV_COLOUR` and
+`GCOLMODE_OR_INV_COLOUR` (0 to 7).

@@ -25,8 +25,14 @@ T4  each test program, through cpp + cc1 + cc2 + ld (crt0.s, rt.s, libc.s),
       t_agon    <agon/vdp.h>'s commands, <agon/uart.h>'s port open and closed
       t_mosx    the rest of <agon/mos.h> (libagon.s): save, copy, fgetc and
                 fputc, cd and getcwd, the FatFS calls and structure sizes, the
-                system variables, the UART by MOS's names
-      t_vdu     <agon/vdp.h>'s main, system, bitmap and sprite commands send
+                system variables, the UART by MOS's names; AgonDev's names
+                (sysvar_ offsets against both structures, sys_vars, the mouse
+                readers, waitvblank, mos_ugetc_nb, mos_oscli's three arguments);
+                AgonDev's gpio, joystick and timer headers, the key queue's
+                setup (t_kbuf, under K, its events from typed keys)
+      t_vdu     <agon/vdp.h>'s main, system, bitmap and sprite commands, and
+                AgonDev's shapes, settings, sprite loader, mos_puts,
+                mos_putstring and putch, send
                 the documented bytes (the units compiled in with
                 AGON_VDU_CAPTURE, the test's vdu and vdu_n recording)
       t_vdu2    the same for audio, buffers, contexts, fonts, copper, tiles
@@ -35,6 +41,11 @@ T4  each test program, through cpp + cc1 + cc2 + ld (crt0.s, rt.s, libc.s),
       t_i64eq   the same for int64.c's (long long) assembly
       t_streq   the same for string.c's (STR_ASM): the library's build
                 against its C, renamed c_ (streq_c.c)
+      t_constops cc2's inline code for constant operands (-O): shifts, & | ^,
+                / and % by powers of two, as values, compound assignments and
+                conditions, each against the helper's answer
+      t_lconstops the same for long operands, and a long tested against 0,
+                compared with a constant, or masked as a condition
       t_intmath 24-, 32- and 64-bit multiply and divide in a vertical-blank
                 C handler while main does them too (no helper's state
                 leaks between them; kbint.s saves the alternate registers)
@@ -119,6 +130,8 @@ PROGRAMS = [
     ("t_llio", 'check_str(buf, "123456789abcdef0");', 'check_str(buf, "123456789abcdef1");'),
     ("t_streq", "check(d_memmove, 0);", "check(d_memmove, 1);"),
     ("t_intmath", "check(int_bad == 0, 1);", "check(int_bad == 0, 0);"),
+    ("t_constops", "check(m7 / 2, -3);", "check(m7 / 2, -4);"),
+    ("t_lconstops", "check(m7 / 2L == -3L, 1);", "check(m7 / 2L == -4L, 1);"),
     ("t_c99lib", 'row("0x1.9ap-4", sprintf(buf, "%.2a", 0.1));', 'row("0x1.99p-4", sprintf(buf, "%.2a", 0.1));'),
 ]
 
@@ -134,15 +147,17 @@ EXPECT = {
     "t_stdlib": (18, 82),
     "t_time": (71, 84),
     "t_agon": (3, 7),
-    "t_mosx": (45, 67),
-    "t_vdu": (17, 148),
-    "t_vdu2": (25, 103),
+    "t_mosx": (42, 118),
+    "t_vdu": (20, 192),
+    "t_vdu2": (25, 106),
     "t_fpeq": (8, 10),
     "t_i64eq": (6, 6),
     "t_fpio": (202, 276 % 256),
     "t_llio": (12, 108),
     "t_streq": (9, 9),
     "t_intmath": (3, 3),
+    "t_constops": (1, 25),
+    "t_lconstops": (1, 22),
     "t_c99lib": (58, 182),
 }
 
@@ -270,6 +285,15 @@ def keyhandler():
     rc = emulate(["t_keyh"], ["t_keyh"], "libck", ["kx"])
     if rc != 3:
         problems.append(f"guard: typed kx gave {rc}, expected 3 (the second key)")
+    p = build(os.path.join(TESTS, "t_kbuf.c"), "t_kbuf")
+    if p:
+        return problems + [p]
+    rc = emulate(["t_kbuf"], ["t_kbuf"], "libckb", ["kq"])
+    if rc != 0:
+        problems.append(f"kbuf, typed kq: check {rc} failed")
+    rc = emulate(["t_kbuf"], ["t_kbuf"], "libckb", ["kx"])
+    if rc != 3:
+        problems.append(f"kbuf guard: typed kx gave {rc}, expected 3 (the second key)")
     return problems
 
 
@@ -390,6 +414,7 @@ def handles():
     for f in FIXTURES + RUNTIME + [LIBC, os.path.join(TESTS, "t_after.c")]:
         args += ["--file", f]
     args += ["--file-at", "lib/agonc/agon/mos.h=" + os.path.join("lib", "agon", "mos.h")]
+    args += ["--file-at", "lib/agonc/stdint.h=" + os.path.join("lib", "libc", "stdint.h")]  # (mos.h includes it)
     for i in range(9):
         args += ["--cmd", f"cpp t_after.c /a{i}.i", "--cmd", f"cc1 /a{i}.i /a{i}.ir -u t_after.c",
                  "--cmd", f"cc2 /a{i}.ir /a{i}.s", "--cmd", f"ld -o /a{i}.asm crt0.s rt.s libc.s /a{i}.s"]
@@ -456,7 +481,7 @@ def main():
         return 1
     cases = [("T4 t_libc, t_mos, t_malloc, t_stdio on the emulator + guards", t4),
              ("I  console input: a typed line reaches fgets(stdin)", conin),
-             ("K  a C key handler sees typed keys, dividing alongside main; interrupt slots", keyhandler),
+             ("K  a C key handler sees typed keys, dividing alongside main; interrupt slots; the key queue", keyhandler),
              ("X  exit() from deep in the stack", x),
              ("E  how programs end: atexit, streams closed, abort, signals, quoted arguments", ending),
              ("C  Ctrl-C: SIGINT's default and a handler, writing, in mos_getkey, at a prompt", interrupts),

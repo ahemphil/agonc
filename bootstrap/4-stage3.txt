@@ -29,6 +29,7 @@ agonc -O -Werror -c -o s3/vdpaudio.s lib/agon/vdpaudio.c
 agonc -O -Werror -c -o s3/vdpbuf.s lib/agon/vdpbuf.c
 agonc -O -Werror -c -o s3/vdpmore.s lib/agon/vdpmore.c
 agonc -O -Werror -c -o s3/handler.s lib/agon/handler.c
+agonc -O -Werror -c -o s3/hw.s lib/agon/hw.c
 echo Comparing stage 3 with stage 2
 compare s2/cpp.bin s3/cpp.bin
 compare s2/cc1.bin s3/cc1.bin
@@ -58,4 +59,5 @@ compare out/vdpaudio.s s3/vdpaudio.s
 compare out/vdpbuf.s s3/vdpbuf.s
 compare out/vdpmore.s s3/vdpmore.s
 compare out/handler.s s3/handler.s
+compare out/hw.s s3/hw.s
 echo The bootstrap is complete: stage 3 is identical to stage 2.

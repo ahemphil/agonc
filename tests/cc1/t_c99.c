@@ -496,6 +496,66 @@ int compound(void)
     return 0;
 }
 
+/* bit-fields given values that are not constants, in local aggregates and
+ * a compound literal: a 1-bit signed field, beside ordinary members given
+ * variables too, two sharing a byte, one cut to its width, a _Bool one,
+ * and a later designator replacing an earlier variable */
+struct bfm { int a; int t : 3; unsigned u : 5; int c; };
+struct bfn { unsigned x : 4; unsigned y : 4; _Bool b : 1; int big : 20; };
+struct bfs { int t : 1; };
+
+static void bitfield_inits(int i, int j)
+{
+    struct bfs s1 = { i };
+    struct bfm m1 = { 1, -i - 2, j, 3 };
+    struct bfm m2 = { i, j - 18, i + 30, j };
+    struct bfn k = { .y = j - 12, .x = i + 20, .b = j, .big = -i * 5000 };
+    struct bfn d = { .x = i, .x = 7, .y = i };
+    struct bfn *p = &(struct bfn){ i + 1, j - 16, j - 21, i * 300000 };
+
+    check(s1.t, -1);
+    check(m1.a * 100 + m1.t * 10 + m1.c, 73);
+    check(m1.u, 21);
+    check(m2.a + m2.t * 10 + m2.c * 100, 2131);
+    check(m2.u, 31);
+    check(k.x * 10 + k.y, 59);
+    check(k.b, 1);
+    check(k.big, -5000);
+    check(d.x * 10 + d.y, 71);
+    check(p->x * 10 + p->y + p->b * 100, 25);
+    check(p->big, 300000);
+}
+
+/* array parameter qualifiers and static, and return of a void expression
+ * (a GCC allowance the default mode makes, with a warning) */
+static int sum_static(const int a[static 3], int b[const])
+{
+    return a[0] + a[1] + a[2] + b[0];
+}
+
+static int void_ret_count;
+
+static void bump(void)
+{
+    void_ret_count++;
+}
+
+static void bump_twice(void)
+{
+    bump();
+    return bump();
+}
+
+static void param_quals(void)
+{
+    int a[3] = { 1, 2, 3 };
+    int b[1] = { 40 };
+
+    check(sum_static(a, b), 46);
+    bump_twice();
+    check(void_ret_count, 2);
+}
+
 /* ---- main ---- */
 
 int main(void)
@@ -521,6 +581,8 @@ int main(void)
     hex_floats();
     designated();
     compound();
+    bitfield_inits(1, 21);
+    param_quals();
     if (fails == 0)
         agon_emu_exit(0);
     else

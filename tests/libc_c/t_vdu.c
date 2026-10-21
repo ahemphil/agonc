@@ -8,6 +8,7 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <agon/vdp.h>
 #include <agon/mos.h>
 #include "check.h"
@@ -47,11 +48,15 @@ void want(int n, ...)
 }
 
 unsigned char rows[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+int path[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+unsigned char frame[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };     /* two RGBA pixels */      /* vdp_fill_path's four points */
+struct { char a, b, c; } puts_cmd = { 22, 7, 9 };      /* VDP_PUTS's structure */
 unsigned long pixels[2] = { 0x44332211L, 0x88776655L };
 
 void test_main(void)
 {
-    vdp_mode(3); want(2, 22, 3);
+    check(vdp_mode(3), 3); want(2, 22, 3);
+    check(vdp_mode(255), -1); want(0);       /* AgonDev's: nothing sent outside 0-254 */
     vdp_cls(); want(1, 12);
     vdp_clg(); want(1, 16);
     vdp_colour(129); want(2, 17, 129);
@@ -68,6 +73,10 @@ void test_main(void)
     vdp_write_at_graphics_cursor(); want(1, 5);
     vdp_enable_screen(); want(1, 6);
     vdp_bell(); want(1, 7);
+    mos_puts("abcdef", 3, 0); want(3, 'a', 'b', 'c');          /* AgonDev's output calls */
+    mos_puts("ab;cd", 0, ';'); want(2, 'a', 'b');
+    mos_putstring("xyz"); want(3, 'x', 'y', 'z');
+    check(putch('Q'), 'Q'); want(1, 'Q');
     vdp_cursor_left(); want(1, 8);
     vdp_cursor_right(); want(1, 9);
     vdp_cursor_down(); want(1, 10);
@@ -94,10 +103,50 @@ void test_main(void)
     vdp_move_to(5, 6); want(6, 25, 4, 5, 0, 6, 0);
     vdp_line_to(5, 6); want(6, 25, 5, 5, 0, 6, 0);
     vdp_point(5, 6); want(6, 25, 69, 5, 0, 6, 0);
-    vdp_triangle(5, 6); want(6, 25, 85, 5, 0, 6, 0);
+    vdp_triangle(1, 2, 3, 4, 5, 6);     /* AgonDev's: an outline, three lines */
+    want(24, 25, 4, 1, 0, 2, 0, 25, 5, 3, 0, 4, 0, 25, 5, 5, 0, 6, 0, 25, 5, 1, 0, 2, 0);
     vdp_circle_radius(5, 6); want(6, 25, 145, 5, 0, 6, 0);
-    vdp_circle(5, 6); want(6, 25, 149, 5, 0, 6, 0);
+    vdp_circle(5, 6, 7); want(12, 25, 148, 5, 0, 6, 0, 25, 145, 7, 0, 0, 0);
     vdp_filled_rect(5, 6); want(6, 25, 101, 5, 0, 6, 0);
+    /* AgonDev's shapes, colours and settings (v0.22) */
+    vdp_line(1, 2, 3, 4); want(12, 25, 4, 1, 0, 2, 0, 25, 5, 3, 0, 4, 0);
+    vdp_rectangle(1, 2, 3, 4);
+    want(30, 25, 4, 1, 0, 2, 0, 25, 5, 3, 0, 2, 0, 25, 5, 3, 0, 4, 0, 25, 5, 1, 0, 4, 0, 25, 5, 1, 0, 2, 0);
+    vdp_parallelogram(10, 10, 20, 10, 25, 20);   /* the fourth corner 15, 20 */
+    want(30, 25, 4, 10, 0, 10, 0, 25, 5, 20, 0, 10, 0, 25, 5, 25, 0, 20, 0, 25, 5, 15, 0, 20, 0,
+         25, 5, 10, 0, 10, 0);
+    vdp_filled_rectangle(1, 2, 3, 4); want(12, 25, 4, 1, 0, 2, 0, 25, 101, 3, 0, 4, 0);
+    vdp_filled_triangle(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 85, 5, 0, 6, 0);
+    vdp_filled_parallelogram(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 117, 5, 0, 6, 0);
+    vdp_filled_circle(5, 6, 7); want(12, 25, 156, 5, 0, 6, 0, 25, 153, 7, 0, 0, 0);
+    vdp_arc(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 165, 5, 0, 6, 0);
+    vdp_segment(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 173, 5, 0, 6, 0);
+    vdp_sector(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 181, 5, 0, 6, 0);
+    vdp_copy_rectangle(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 191, 5, 0, 6, 0);
+    vdp_move_rectangle(1, 2, 3, 4, 5, 6); want(18, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 189, 5, 0, 6, 0);
+    vdp_fill_path(path, sizeof path);
+    want(24, 25, 4, 1, 0, 2, 0, 25, 4, 3, 0, 4, 0, 25, 221, 5, 0, 6, 0, 25, 221, 7, 0, 8, 0);
+    vdp_fill_path(path, 4 * sizeof(int)); want(0);      /* fewer than three points */
+    vdp_dotdash_line(1, 2, 3, 4); want(12, 25, 4, 1, 0, 2, 0, 25, 21, 3, 0, 4, 0);
+    vdp_dotdash_line_to(3, 4); want(6, 25, 21, 3, 0, 4, 0);
+    vdp_line_fill_leftright_to_fg(3, 4); want(6, 25, 109, 3, 0, 4, 0);
+    vdp_line_fill_leftright_to_nonbg(3, 4); want(6, 25, 77, 3, 0, 4, 0);
+    vdp_line_fill_right_to_bg(3, 4); want(6, 25, 93, 3, 0, 4, 0);
+    vdp_line_fill_right_to_nonfg(3, 4); want(6, 25, 125, 3, 0, 4, 0);
+    vdp_plot_bitmap(3, 4); want(6, 25, 237, 3, 0, 4, 0);
+    vdp_outchar(13); want(2, 27, 13);
+    vdp_set_graphics_fg_colour(1, 5); want(3, 18, 1, 5);
+    vdp_set_graphics_bg_colour(1, 5); want(3, 18, 1, 133);
+    vdp_set_text_bg_colour(5); want(2, 17, 133);
+    vdp_set_logical_coordinates(); want(4, 23, 0, 0xC0, 1);
+    vdp_set_pixel_coordinates(); want(4, 23, 0, 0xC0, 0);
+    vdp_set_dotdash_line_pattern(1, 2, 3, 4, 5, 6, 7, 8); want(10, 23, 6, 1, 2, 3, 4, 5, 6, 7, 8);
+    vdp_set_dotdash_pattern_length(9); want(4, 23, 0, 0xF2, 9);
+    vdp_set_dotdash_pattern_length(65); want(0);
+    vdp_set_hardware_sprite(); want(3, 23, 27, 19);
+    vdp_set_software_sprite(); want(3, 23, 27, 20);
+    vdp_mouse_set_bitmap(3, 4); want(5, 23, 27, 0x40, 3, 4);
+    VDP_PUTS(puts_cmd); want(3, 22, 7, 9);
     vdp_reset_viewports(); want(1, 26);
     vdp_literal(7); want(2, 27, 7);
     vdp_set_text_viewport(1, 20, 30, 2); want(5, 28, 1, 20, 30, 2);
@@ -180,9 +229,19 @@ void test_system(void)
 
 void test_bitmaps(void)
 {
+    FILE *f;
     vdp_select_bitmap(3); want(4, 23, 27, 0, 3);
     vdp_load_bitmap(2, 1, pixels); want(15, 23, 27, 1, 2, 0, 1, 0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88);
-    vdp_capture_bitmap(9); want(7, 23, 27, 1, 9, 0, 0, 0);
+    vdp_capture_bitmap(10, 20, 30, 40, 9);       /* AgonDev's: the corners as moves first */
+    want(19, 25, 4, 20, 0, 10, 0, 25, 4, 40, 0, 30, 0, 23, 27, 1, 9, 0, 0, 0);
+    /* AgonDev's sprite loader: frame 0 from spr0.rgb into bitmap 5; frame
+     * 1's file is missing, so one frame is loaded */
+    f = fopen("spr0.rgb", "wb");
+    fwrite(frame, 1, 8, f);
+    fclose(f);
+    check(vdp_load_sprite_bitmaps("spr", "%s%d.rgb", 2, 1, 2, 5), 1);
+    want(19, 23, 27, 0, 5, 23, 27, 1, 2, 0, 1, 0, 1, 2, 3, 4, 5, 6, 7, 8);
+    remove("spr0.rgb");
     vdp_solid_bitmap(16, 8, 255, 128, 0, 255); want(11, 23, 27, 2, 16, 0, 8, 0, 255, 128, 0, 255);
     vdp_draw_bitmap(320, 200); want(7, 23, 27, 3, 0x40, 1, 200, 0);
     vdp_adv_select_bitmap(64005); want(5, 23, 27, 0x20, 0x05, 0xFA);

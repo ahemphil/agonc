@@ -25,11 +25,17 @@ T4  t_drv.c + t_util.c + libextra.s built by the driver, with -I, -D, -U
     fails check 2; built with -DCOUNT it reports 11 checks. And twice.c
     with twice.s, driver.md's example of a function in a hand-written .s:
     exit 42.
+H8  wildcards (sorted, letters in either case alike, no dot files) and
+    --lib (the units joined in that order, a version-2 index, linked with
+    -l; .s inputs joined as they are); a response file over the driver's
+    1,200-byte block; 32 inputs build, 33 do not, as on the Agon, unless
+    --big-tables.
 S1  on the emulator, the moslet driver (make cross) and the AgDev-built
-    passes build libextra.s (-c) and the same program with the same options
-    (the library found in /usrlib); it runs (exit 0, which includes all 8
-    MOS handles being free afterwards), and the device's .bin and .s equal
-    the host driver's.
+    passes build libextra.s (--lib with a wildcard, ext*.c, and its index)
+    and the same program with the same options (the library found in
+    /usrlib); it runs (exit 0, which includes all 8 MOS handles being free
+    afterwards), and the device's .bin and .s equal the host driver's
+    (-c's .s: --lib of one file is the same).
 F   on the emulator, a build that fails in ld returns non-zero, so MOS
     stops the script (the next command would exit 0; the run times out),
     and it leaves neither the binary nor anything in /tmp.
@@ -267,6 +273,16 @@ def h4():
     r = agonc("-ansi", "-o", o("impl3.bin"), o("impl3.c"), o("impl4.c"))
     if r.returncode != 200 or "implicit call to _f, which returns long" not in r.stderr or exists(o("impl3.bin")):
         problems.append(f"implicit call to a long function: status {r.returncode}, stderr {r.stderr.strip()!r}")
+    # AgDev's header names AgonDev keeps: they warn and include agonc's
+    # own, except under -ansi (C89 has no #warning)
+    for hdr in ("mos_api.h", "agon/vdp_vdu.h"):
+        open(os.path.join(REPO, o("dep.c")), "w").write(f"#include <{hdr}>\nint main(void) {{ return 0; }}\n")
+        r = agonc("-o", o("dep.bin"), o("dep.c"))
+        if r.returncode or "deprecated" not in r.stderr:
+            problems.append(f"<{hdr}>: status {r.returncode}, stderr {r.stderr.strip()!r}, expected 0 and a warning")
+        r = agonc("-ansi", "-o", o("dep.bin"), o("dep.c"))
+        if r.returncode or "deprecated" in r.stderr:
+            problems.append(f"<{hdr}> with -ansi: status {r.returncode}, stderr {r.stderr.strip()!r}")
     open(os.path.join(REPO, o("args.rsp")), "w").write(f"-o {o('rsp.bin')}\n{t('hello.c')}\n")
     problems += expect_ok(agonc("@" + o("args.rsp")), "the driver's @file")
     problems += same(o("rsp.bin"), o("hand.bin"), "the driver's @file")
@@ -364,6 +380,10 @@ ERRORS = [      # each run as agonc -o OUT/err.bin <args>
     ([o("dup1/x.c"), o("dup2/x.c")], "another input has the same name"),
     ([o("hand.asm"), HELLO], "an .asm file is assembled alone"),
     (["-c", o("dup1/x.c"), o("dup2/x.c"), "-o"], "-o needs an argument"),
+    ([o("wild/*.zz")], "no file matches"),
+    ([o("w*/a.c")], "wildcards go in a file name, not a folder"),
+    (["--lib", HELLO], "--lib needs -o and the library's name"),
+    (["--lib", "-c", HELLO], "--lib does not go with -E, -c or -S"),
 ]
 
 
@@ -383,6 +403,72 @@ def h6():
     if tmp_files():
         problems.append(f"the failures left {tmp_files()} in tmp")
     return problems
+
+
+def h8():
+    """Wildcards, --lib, a long response file, and the limits the PC
+    shares with the Agon (and --big-tables, which raises them)."""
+    problems = []
+    w = os.path.join(REPO, o("wild"))
+    os.makedirs(w, exist_ok=True)
+    for n in ("c", "a", "B"):                   # made out of order; one name in capitals
+        open(os.path.join(w, n + ".c"), "w", newline="\n").write(f"int f_{n}(void) {{ return 1; }}\n")
+    open(os.path.join(w, ".hidden.c"), "w", newline="\n").write("int hidden(void) { return 0; }\n")
+    open(os.path.join(w, "notes.txt"), "w", newline="\n").write("not C\n")
+    # --lib with a wildcard: the matches in order, letters in either case alike, no dot file
+    r = agonc("--lib", "-o", o("libw.s"), o("wild/*.c"))
+    problems += expect_ok(r, "--lib wild/*.c")
+    lib = (read(o("libw.s")) or b"").decode()
+    units = [l.split()[1] for l in lib.splitlines() if l.startswith(";;unit ")]
+    if units != ["a.c", "B.c", "c.c"]:
+        problems.append(f"--lib wild/*.c joined {units}, expected a.c, B.c, c.c")
+    if not exists(o("libw.idx")) or not (read(o("libw.idx")) or b"").startswith(b";;agonc-index 2 "):
+        problems.append("--lib wrote no version-2 index")
+    # the library linked with -l: a program using two of its three functions
+    open(os.path.join(REPO, o("wmain.c")), "w", newline="\n").write(
+        "int f_a(void);\nint f_c(void);\nint main(void) { return f_a() + f_c() - 2; }\n")
+    problems += expect_ok(agonc("-o", o("wmain.bin"), o("wmain.c"), "-L", OUT, "-lw"), "linking -lw")
+    # one wildcard on .s files too, joined as they are
+    r = agonc("--lib", "-o", o("libs2.s"), o("lib?.s"))
+    problems += expect_ok(r, "--lib lib?.s")
+    if read(o("libs2.s")) != read(o("libw.s")):
+        problems.append("--lib lib?.s is not libw.s joined as it is")
+    # a unit that fails to compile: its error alone, status 200, no library
+    open(os.path.join(REPO, o("libfail.c")), "w", newline="\n").write("int f(void) { return }\n")
+    r = agonc("--lib", "-o", o("libbad.s"), o("libfail.c"))
+    if r.returncode != 200 or "libfail.c:1: error" not in r.stderr or "cannot write" in r.stderr \
+            or exists(o("libbad.s")):
+        problems.append(f"--lib of a failing unit: status {r.returncode}, stderr {r.stderr.strip()!r}, "
+                        f"library {exists(o('libbad.s'))}")
+    # a response file longer than the driver's 1,200-byte block, the output's
+    # name across the block's end (read again at the next block's start)
+    rsp = os.path.join(REPO, o("long.rsp"))
+    with open(rsp, "w", newline="\n") as f:
+        f.write("-o" + " " * 1190 + o("long.bin").replace("\\", "/") + "\n" + " \n" * 300 +
+                HELLO.replace("\\", "/") + "\n")
+    if os.path.getsize(rsp) < 1800:
+        problems.append("the long response file is not long")
+    problems += expect_ok(agonc("@" + o("long.rsp")), "a 1,800-byte response file")
+    problems += same(o("long.bin"), o("hand.bin"), "the long response file's program")
+    # 32 inputs fit, as on the Agon; 33 do not, unless --big-tables
+    m = os.path.join(REPO, o("many"))
+    os.makedirs(m, exist_ok=True)
+    for i in range(33):
+        body = "int main(void) { return 0; }\n" if i == 0 else f"int g{i}(void) {{ return {i}; }}\n"
+        open(os.path.join(m, f"m{i:02d}.c"), "w", newline="\n").write(body)
+    files = sorted(glob_files(m, ".c"))
+    problems += expect_ok(agonc("-o", o("m32.bin"), *files[:32]), "32 inputs")
+    r = agonc("-o", o("m33.bin"), *files)
+    if r.returncode != 200 or "too many input files" not in r.stderr:
+        problems.append(f"33 inputs: status {r.returncode}, {r.stderr.strip()[:200]!r}")
+    problems += expect_ok(agonc("--big-tables", "-o", o("m33.bin"), *files), "33 inputs with --big-tables")
+    if tmp_files():
+        problems.append(f"left {tmp_files()} in tmp")
+    return problems
+
+
+def glob_files(folder, ext):
+    return [os.path.join(os.path.relpath(folder, REPO), n) for n in os.listdir(folder) if n.endswith(ext)]
 
 
 # ---- the emulator ----------------------------------------------------------
@@ -460,12 +546,14 @@ def s1():
             return [f"host reference build failed: {(r.stderr + r.stdout).strip()[:300]}"]
         if args[0] == "-c":
             shutil.copy(os.path.join(REPO, o("s1/libextra.s")), os.path.join(REPO, ROOT, "usrlib"))
-    cmds = ["agonc -c -o /usrlib/libextra.s extra.c",
+    cmds = ["agonc --lib -o /usrlib/libextra.s ext*.c",
             "agonc -o /bin/dprog.bin -lextra " + " ".join(DRV_OPTS) + " t_drv.c t_util.c", "dprog"]
     rc = emulate([], cmds, "drvs1", 1500, card_files())
     problems = [] if rc == 0 else [f"the device-built program gave {rc}, expected 0 (124: a command failed)"]
     card = os.path.join("emulator_sdcard", "drvs1")
     problems += same(os.path.join(card, "usrlib", "libextra.s"), o("s1/libextra.s"), "device libextra.s")
+    if not exists(os.path.join(card, "usrlib", "libextra.idx")):
+        problems.append("the device's --lib wrote no libextra.idx")
     problems += same(os.path.join(card, "bin", "dprog.bin"), o("s1/dprog.bin"), "device dprog.bin")
     left = os.listdir(os.path.join(REPO, card, "tmp", "agonc")) if exists(os.path.join(card, "tmp", "agonc")) else []
     if left:
@@ -522,6 +610,7 @@ def main():
              ("H4 ignored options, --version, -v, -w, -Werror, @file, pass response files", h4),
              ("H5 -nostdlib, -L/-l, -l from /usrlib, -Wl,--entry", h5),
              ("H7 -h, -time, and -o never overwriting a source", h7),
+             ("H8 wildcards, --lib, a long response file, 32 inputs (33 with --big-tables)", h8),
              ("H6 errors: status 200, the message, no output", h6),
              ("T4 t_drv (2 units, a user library, -I/-D/-U/-l) on the emulator + guards; a hand-written .s", t4)]
     if "--no-stage1" not in sys.argv:

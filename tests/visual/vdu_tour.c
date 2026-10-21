@@ -119,9 +119,10 @@ void lines_screen(void)
     next();
 }
 
-/* The top row through our functions, the bottom row through vdp_plot's
- * raw codes. (AgDev's codes for these, 80 and 148, drew nothing here:
- * "move" codes; ours now draw, 85 and 149.) */
+/* The top row through the library's functions, the bottom row through
+ * vdp_plot's raw codes. (AgDev's codes for these, 80 and 148, drew nothing
+ * here: "move" codes. AgonDev's, which agonc follows since, draw the
+ * triangle from its corners and the circle from its centre and radius.) */
 void shapes_screen(void)
 {
     start("TOP ROW (our functions) and BOTTOM ROW (plain PLOT codes):\r\n"
@@ -132,12 +133,9 @@ void shapes_screen(void)
     vdp_move_to(100, 500);
     vdp_filled_rect(350, 700);
     vdp_gcol(0, GREEN);
-    vdp_move_to(500, 500);
-    vdp_move_to(750, 500);
-    vdp_triangle(625, 700);
+    vdp_filled_triangle(500, 500, 750, 500, 625, 700);
     vdp_gcol(0, BLUE);
-    vdp_move_to(1000, 600);
-    vdp_circle(1100, 600);
+    vdp_circle(1000, 600, 100);
     vdp_gcol(0, RED);
     vdp_plot(4, 100, 150);
     vdp_plot(101, 350, 350);            /* rectangle, absolute, foreground */

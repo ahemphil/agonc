@@ -7,7 +7,9 @@ The suites are not in git; their licences are in their own files. A
 suite already fetched
 at the pinned revision is left alone. Needs git and network access. After
 fetching, the classifier (classify.py) writes third_party/suites/out/<suite>.csv,
-which `run_suite.py --update-skips` turns into the committed skip lists.
+with strict mode's predefined macros, and <suite>_c99.csv, with the default
+mode's, which `run_suite.py --update-skips` turns into the committed skip
+lists.
 """
 import os, re, shutil, subprocess, sys, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -115,9 +117,11 @@ def fetch_sdcc():
 def classify(key):
     folder, tests, globs, flags = CLASSIFY[key]
     os.makedirs(os.path.join(SUITES, "out"), exist_ok=True)
-    subprocess.run([PY, os.path.join(HERE, "classify.py"), os.path.join(SUITES, "out", key), key,
-                    os.path.join(SUITES, tests)] + globs + flags, check=True, stdout=subprocess.DEVNULL)
-    print(f"{key}: classified into third_party/suites/out/{key}.csv")
+    for out, extra in ((key, []), (key + "_c99", ["--c99"])):
+        subprocess.run([PY, os.path.join(HERE, "classify.py"), os.path.join(SUITES, "out", out), key,
+                        os.path.join(SUITES, tests)] + globs + flags + extra, check=True, stdout=subprocess.DEVNULL)
+    print(f"{key}: classified into third_party/suites/out/{key}.csv and, as the default mode sees it, "
+          f"{key}_c99.csv")
 
 
 def main():

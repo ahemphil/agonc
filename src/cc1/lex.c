@@ -42,6 +42,7 @@ int tok_wide;                   /* TK_STR: a wide string literal, L"..." */
 int tok_line;
 int prev_line;
 char cur_file[128];
+int cur_file_name = -1;
 int errors;
 int warnings_off;
 int werror;
@@ -278,6 +279,7 @@ int lex_open(char *path)
         return 0;
     strncpy(cur_file, path, 127);
     cur_file[127] = 0;
+    cur_file_name = intern(cur_file);
     line = 1;
     ch = raw();
     at_bol = 1;
@@ -396,6 +398,7 @@ static void line_marker(void)
             getch();
         }
         cur_file[i] = 0;
+        cur_file_name = intern(cur_file);
     }
     while (ch != '\n' && ch != -1)
         getch();

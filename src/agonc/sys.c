@@ -207,7 +207,7 @@ int sys_size(char *path)
     return mos_fsize(path);
 }
 
-int sys_read(char *path, char *buf, int max)
+int sys_read(char *path, int offset, char *buf, int max)
 {
     int h;
     int n;
@@ -215,9 +215,46 @@ int sys_read(char *path, char *buf, int max)
     h = mos_fopen(path, FA_READ);
     if (h == 0)
         return -1;
-    n = mos_fread(h, buf, max);
+    n = 0;
+    if (offset == 0 || offset < mos_fsize(path)) {
+        if (offset > 0)
+            mos_flseek(h, (unsigned long)offset);
+        n = mos_fread(h, buf, max);
+    }
     mos_fclose(h);
     return n;
+}
+
+/* --lib's join: each file copied onto the end of out, a block at a time. */
+int sys_join(char *out, char **files, int n)
+{
+    char buf[256];
+    int ho;
+    int h;
+    int i;
+    int k;
+    int ok;
+
+    ho = mos_fopen(out, FA_WRITE | FA_CREATE_ALWAYS);
+    if (ho == 0)
+        return 0;
+    ok = 1;
+    for (i = 0; i < n && ok; i++) {
+        h = mos_fopen(files[i], FA_READ);
+        if (h == 0) {
+            ok = 0;
+            break;
+        }
+        while ((k = mos_fread(h, buf, sizeof buf)) > 0) {
+            if (mos_fwrite(ho, buf, k) != (unsigned)k) {
+                ok = 0;
+                break;
+            }
+        }
+        mos_fclose(h);
+    }
+    mos_fclose(ho);
+    return ok;
 }
 
 int sys_write(char *path, char *text)
@@ -304,18 +341,77 @@ int sys_cat(char *path)
     return 1;
 }
 
+/* A folder through MOS's FatFs calls; the structures must stay put while
+ * the listing is open, so they are static. libagon.s has these calls as
+ * ffs_dopen and the rest, but the bootstrap builds this driver before it
+ * builds libagon.s (with the driver), so the driver makes them itself:
+ * MOS function fn (0x91 open, 0x93 read, 0x92 close) with HL the DIR and
+ * DE the path or the FILINFO, the FRESULT back in A. fn, hl and de are
+ * the argument slots (ix+6), (ix+9) and (ix+12); r is the first local. */
+static int dir_call(int fn, void *hl, void *de)
+{
+    int r;
+
+    asm("ld hl,(ix+9)\n"
+        "ld de,(ix+12)\n"
+        "ld a,(ix+6)\n"
+        "push ix\n"
+        "rst.lis 08h\n"
+        "pop ix\n"
+        "ld hl,0\n"
+        "ld l,a\n"
+        "ld (ix-3),hl");
+    return r;
+}
+
+static DIR dir_obj;
+static FILINFO dir_info;
+
+int sys_dir_open(char *dir)
+{
+    return dir_call(0x91, &dir_obj, dir) == FR_OK;
+}
+
+int sys_dir_next(char *name, int max)
+{
+    for (;;) {
+        if (dir_call(0x93, &dir_obj, &dir_info) != FR_OK || dir_info.fname[0] == 0)
+            return 0;
+        if ((dir_info.fattrib & AM_DIR) == 0 && (int)strlen(dir_info.fname) < max) {
+            strcpy(name, dir_info.fname);
+            return 1;
+        }
+    }
+}
+
+void sys_dir_close(void)
+{
+    dir_call(0x92, &dir_obj, NULL);
+}
+
 #else
 
 /* ---- the host: an ordinary program ----------------------------------------
  *
  * Passes are found beside the driver, the assembler on the PATH, and the
- * library layout under $AGONC_ROOT, whose tmp/ must exist.
+ * library layout under $AGONC_ROOT, whose tmp/ must exist. Standard C
+ * throughout, but for the folder listing wildcards need: POSIX's
+ * opendir, which MinGW has too.
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200112L     /* opendir and stat under -std=c89 */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>                /* (not dirent.h, whose <io.h> would find common/io.h) */
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 #include "io.h"
 #include "sys.h"
 
@@ -440,7 +536,7 @@ int sys_size(char *path)
     return n;
 }
 
-int sys_read(char *path, char *buf, int max)
+int sys_read(char *path, int offset, char *buf, int max)
 {
     FILE *f;
     int n;
@@ -448,9 +544,40 @@ int sys_read(char *path, char *buf, int max)
     f = fopen(path, "rb");
     if (f == NULL)
         return -1;
-    n = fread(buf, 1, max, f);
+    n = 0;
+    if (fseek(f, (long)offset, SEEK_SET) == 0)
+        n = (int)fread(buf, 1, max, f);
     fclose(f);
     return n;
+}
+
+int sys_join(char *out, char **files, int n)
+{
+    char buf[4096];
+    FILE *fo;
+    FILE *f;
+    size_t k;
+    int i;
+    int ok;
+
+    fo = fopen(out, "wb");
+    if (fo == NULL)
+        return 0;
+    ok = 1;
+    for (i = 0; i < n && ok; i++) {
+        f = fopen(files[i], "rb");
+        if (f == NULL) {
+            ok = 0;
+            break;
+        }
+        while ((k = fread(buf, 1, sizeof buf, f)) > 0)
+            if (fwrite(buf, 1, k, fo) != k)
+                ok = 0;
+        fclose(f);
+    }
+    if (fclose(fo) != 0)
+        ok = 0;
+    return ok;
 }
 
 int sys_write(char *path, char *text)
@@ -527,5 +654,96 @@ int sys_cat(char *path)
     fclose(f);
     return 1;
 }
+
+#ifdef _WIN32
+
+/* Windows: FindFirstFile on the folder's name with a star after it,
+ * which returns the first entry itself; sys_dir_next hands that one out
+ * before asking for more. */
+static HANDLE dir_h = INVALID_HANDLE_VALUE;
+static WIN32_FIND_DATAA dir_fd;
+static int dir_have;
+
+int sys_dir_open(char *dir)
+{
+    char pat[1024];
+    int n;
+
+    n = (int)strlen(dir);
+    if (n + 3 >= (int)sizeof pat)
+        return 0;
+    strcpy(pat, n > 0 ? dir : ".");
+    n = (int)strlen(pat);
+    strcpy(pat + n, pat[n - 1] == '/' || pat[n - 1] == '\\' || pat[n - 1] == ':' ? "*" : "/*");
+    dir_h = FindFirstFileA(pat, &dir_fd);
+    dir_have = dir_h != INVALID_HANDLE_VALUE;
+    return dir_have;
+}
+
+int sys_dir_next(char *name, int max)
+{
+    for (;;) {
+        if (!dir_have && !FindNextFileA(dir_h, &dir_fd))
+            return 0;
+        dir_have = 0;
+        if ((dir_fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && (int)strlen(dir_fd.cFileName) < max) {
+            strcpy(name, dir_fd.cFileName);
+            return 1;
+        }
+    }
+}
+
+void sys_dir_close(void)
+{
+    if (dir_h != INVALID_HANDLE_VALUE)
+        FindClose(dir_h);
+    dir_h = INVALID_HANDLE_VALUE;
+}
+
+#else
+
+/* POSIX: opendir, and stat to leave folders out. */
+static DIR *dir_p;
+static char dir_name[1024];     /* the folder, with a / to put a name after */
+static int dir_len;
+
+int sys_dir_open(char *dir)
+{
+    dir_len = (int)strlen(dir);
+    if (dir_len + 2 >= (int)sizeof dir_name)
+        return 0;
+    strcpy(dir_name, dir);
+    if (dir_len > 0 && dir_name[dir_len - 1] != '/' && dir_name[dir_len - 1] != '\\')
+        dir_name[dir_len++] = '/';
+    dir_name[dir_len] = 0;
+    dir_p = opendir(dir[0] ? dir : ".");
+    return dir_p != NULL;
+}
+
+int sys_dir_next(char *name, int max)
+{
+    struct dirent *e;
+    struct stat st;
+
+    while ((e = readdir(dir_p)) != NULL) {
+        if ((int)strlen(e->d_name) >= max || dir_len + (int)strlen(e->d_name) >= (int)sizeof dir_name)
+            continue;
+        strcpy(dir_name + dir_len, e->d_name);
+        if (stat(dir_name, &st) == 0 && S_ISDIR(st.st_mode))
+            continue;
+        strcpy(name, e->d_name);
+        return 1;
+    }
+    return 0;
+}
+
+void sys_dir_close(void)
+{
+    if (dir_p != NULL)
+        closedir(dir_p);
+    dir_p = NULL;
+}
+
+#endif
 
 #endif

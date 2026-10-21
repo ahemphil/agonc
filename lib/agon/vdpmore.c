@@ -349,3 +349,30 @@ void vdp_tile_layer_update_draw(void)
     b[1] = 0;
     tile(b, 2);
 }
+
+/* ---- AgonDev's names (v0.22) --------------------------------------------------------- */
+
+/* The copper, through VDP variable 0x0310 (VDU 23, 0, &F8, set, and &F9,
+ * clear), as AgonDev's sends them. */
+void vdp_copper_enable(void)
+{
+    char b[7];
+
+    b[0] = 23;
+    b[1] = 0;
+    b[2] = (char)0xF8;
+    W(b, 3, 0x0310);
+    W(b, 5, 0);
+    vdu_n(b, 7);
+}
+
+void vdp_copper_disable(void)
+{
+    char b[5];
+
+    b[0] = 23;
+    b[1] = 0;
+    b[2] = (char)0xF9;
+    W(b, 3, 0x0310);
+    vdu_n(b, 5);
+}

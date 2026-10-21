@@ -26,7 +26,9 @@
  * removing a handler (or __int_restore at exit) puts the old one back.
  */
 
+#include <stdlib.h>
 #include <agon/mos.h>
+#include <agon/keyboard.h>
 
 /* Read by kbint.s's entry points, where they are __kb_fn and __int_fn
  * (a C name gains a leading underscore in assembly, abi.md section 7).
@@ -136,4 +138,73 @@ void __int_restore(void)
             slot_vector[s] = 0;
         }
     }
+}
+
+/* ---- AgonDev's key event queue (<agon/keyboard.h>) ---- */
+
+/* n + 1 slots of 4 bytes, one always empty, so that head == tail means
+ * empty; kb_queue fills them from the key handler (interrupts off), and
+ * kbuf_poll_event empties them. A full queue drops the newest. */
+static unsigned char *kq;
+static int kq_slots;
+static volatile int kq_head;    /* the next to write */
+static volatile int kq_tail;    /* the next to read */
+
+static void kb_queue(const unsigned char *packet)
+{
+    int next;
+    unsigned char *p;
+
+    next = kq_head + 1 == kq_slots ? 0 : kq_head + 1;
+    if (next == kq_tail)
+        return;
+    p = kq + 4 * kq_head;
+    p[0] = packet[0];
+    p[1] = packet[1];
+    p[2] = packet[2];
+    p[3] = packet[3];
+    kq_head = next;
+}
+
+void kbuf_init(int buf_len)
+{
+    kbuf_deinit();
+    if (buf_len < 1 || buf_len > 254)
+        return;
+    kq = malloc(4 * (buf_len + 1));
+    if (kq == NULL)
+        return;
+    kq_slots = buf_len + 1;
+    kq_head = 0;
+    kq_tail = 0;
+    mos_set_key_handler(kb_queue);
+}
+
+int kbuf_poll_event(struct keyboard_event_t *e)
+{
+    unsigned char *p;
+
+    if (kq == NULL || kq_tail == kq_head)
+        return 0;
+    p = kq + 4 * kq_tail;
+    e->ascii = p[0];
+    e->kmod = p[1];
+    e->vkey = p[2];
+    e->isdown = p[3];
+    kq_tail = kq_tail + 1 == kq_slots ? 0 : kq_tail + 1;
+    return 1;
+}
+
+void kbuf_clear(void)
+{
+    kq_tail = kq_head;
+}
+
+void kbuf_deinit(void)
+{
+    if (kq == NULL)
+        return;
+    mos_set_key_handler(NULL);
+    free(kq);
+    kq = NULL;
 }

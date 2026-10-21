@@ -263,9 +263,8 @@ void vdp_audio_volume_envelope_ADSR(int channel, int attack, int decay, int sust
     vdu_n(b, 13);
 }
 
-/* A multi-phase envelope's opening bytes only (AgDev's form): the counts
- * and phases follow with vdu_n. */
-void vdp_audio_volume_envelope_multiphase_ADSR(int channel)
+/* A multi-phase envelope's opening six bytes. */
+static void multiphase_head(int channel)
 {
     char b[6];
 
@@ -274,12 +273,41 @@ void vdp_audio_volume_envelope_multiphase_ADSR(int channel)
     vdu_n(b, 6);
 }
 
-/* The whole multi-phase envelope (VDP 2.5.0): data holds n bytes, the
+/* A count of phases, then each phase from data as the VDP takes it: its
+ * level in a byte (the low 8 bits of its value) and its duration in 16
+ * bits. Returns where the next phases start in data. */
+static const short *phases(int count, const short *data)
+{
+    char b[3];
+    int i;
+
+    vdu(count);
+    for (i = 0; i < count; i++) {
+        b[0] = (char)data[0];
+        W(b, 1, data[1]);
+        vdu_n(b, 3);
+        data = data + 2;
+    }
+    return data;
+}
+
+/* AgonDev's whole multi-phase envelope (VDP 2.5.0): data holds a level and
+ * a duration for each attack phase, then each sustain phase, then each
+ * release phase. */
+void vdp_audio_volume_envelope_multiphase_ADSR(int channel, int attacks, int sustains, int releases, const short *data)
+{
+    multiphase_head(channel);
+    data = phases(attacks, data);
+    data = phases(sustains, data);
+    phases(releases, data);
+}
+
+/* The same from the bytes as the VDP takes them: data holds n bytes, the
  * attack count and its level, duration; pairs, then the sustain's, then
- * the release's, as the VDP takes them. */
+ * the release's. */
 void vdp_audio_volume_envelope_multiphase(int channel, const unsigned char *data, int n)
 {
-    vdp_audio_volume_envelope_multiphase_ADSR(channel);
+    multiphase_head(channel);
     vdu_n((const char *)data, n);
 }
 
@@ -289,10 +317,9 @@ void vdp_audio_frequency_envelope_disable(int channel)
     cmd1(channel, 7, 0);
 }
 
-/* A stepped envelope's opening bytes (AgDev's form): phase_count pairs of
- * adjustment; steps; follow with vdu_n. control: 1 repeat, 2 cumulative,
- * 4 restrict to 0-65535. */
-void vdp_audio_frequency_envelope_stepped(int channel, int phase_count, int control, int step_length)
+/* A stepped envelope's opening ten bytes. control: 1 repeat, 2
+ * cumulative, 4 restrict to 0-65535. */
+static void stepped_head(int channel, int phase_count, int control, int step_length)
 {
     char b[10];
 
@@ -313,7 +340,7 @@ void vdp_audio_frequency_envelope(int channel, int control, int step_length, con
     char b[4];
     int i;
 
-    vdp_audio_frequency_envelope_stepped(channel, phase_count, control, step_length);
+    stepped_head(channel, phase_count, control, step_length);
     for (i = 0; i < phase_count; i++) {
         W(b, 0, phases[2 * i]);
         W(b, 2, phases[2 * i + 1]);
@@ -376,4 +403,33 @@ void vdp_audio_set_waveform_parameter(int channel, int parameter, int value)
     b[5] = parameter;
     W(b, 6, value);
     vdu_n(b, (parameter & 0x80) ? 8 : 7);
+}
+
+/* ---- AgonDev's names (v0.22) --------------------------------------------------------- */
+
+/* AgonDev's whole stepped envelope: data holds 2 * phase_count values, an
+ * adjustment and a step count for each phase, each sent as 16 bits. */
+void vdp_audio_frequency_envelope_stepped(int channel, int phase_count, int control, int step_length, const short *data)
+{
+    char b[2];
+    int i;
+
+    stepped_head(channel, phase_count, control, step_length);
+    for (i = 0; i < 2 * phase_count; i++) {
+        W(b, 0, data[i]);
+        vdu_n(b, 2);
+    }
+}
+
+/* Plays the channel's sample at volume: command 0, a note of frequency 0
+ * and duration 0, as AgonDev's does. */
+void vdp_audio_play_sample(int channel, int volume)
+{
+    char b[10];
+
+    head(b, channel, 0);
+    b[5] = volume;
+    W(b, 6, 0);
+    W(b, 8, 0);
+    vdu_n(b, 10);
 }

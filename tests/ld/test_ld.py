@@ -13,7 +13,7 @@ same output as without them; a library whose size has changed is read
 instead of its index, and an index whose sections are not where it says
 is an error. The stage-1 case also indexes libc.s on the device.
 """
-import os, shutil, subprocess, sys
+import os, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -133,6 +133,10 @@ def index_cases(exe):
         problems.append(f"indexes not used: {r.stdout.strip()[-200:]}")
     if read(p("indexed.asm")) != read(p("plain.asm")) or read(p("plain.asm")) is None:
         problems.append("output through the indexes differs from the output without them")
+    # loaded on demand: with everything but hello.s indexed, the tables hold just what is linked
+    m = re.search(r"ld: (\d+) of (\d+) sections selected", r.stdout)
+    if not m or m.group(1) != m.group(2):
+        problems.append(f"sections not loaded on demand: {m.group(0) if m else r.stdout.strip()[:200]}")
     # indexing several files at once gives each the index it would get alone
     alone = os.path.join(d, "alone")
     os.makedirs(alone)
@@ -160,6 +164,53 @@ def index_cases(exe):
     if r.returncode != 200 or want not in r.stderr.splitlines():
         problems.append(f"implicit call through an index: {r.returncode} {r.stderr.strip()[:200]}")
     results.append(("index_cases (basic, weak and an implicit call through indexes)", problems))
+
+    # two names with one hash: the first candidate is checked and passed over
+    problems = []
+    for n in ("coll_lib.s", "coll_main.s", "over_lib.s", "over_main.s"):
+        shutil.copy(c(n), d)
+    link(exe, p("coll_plain.asm"), [p("coll_main.s"), p("coll_lib.s")])
+    subprocess.run([exe, "--index", p("coll_lib.s")], capture_output=True)
+    idx = open(p("coll_lib.idx"), encoding="ascii").read() if os.path.exists(p("coll_lib.idx")) else ""
+    if idx.count("\n7dbf ") != 2:
+        problems.append("coll_lib.idx's directory has not two entries with hash 7dbf")
+    r = link(exe, p("coll.asm"), [p("coll_main.s"), p("coll_lib.s")], verbose=True)
+    out = read(p("coll.asm")) or b""
+    if r.returncode or out != read(p("coll_plain.asm")):
+        problems.append(f"status {r.returncode}, or output differs from the link without the index")
+    if b"_c3100:" not in out or b"_c2183:" in out:
+        problems.append("the wrong one of the two sections was linked")
+    if "; 1 sections loaded from indexes" not in r.stdout:
+        problems.append(f"not one section loaded: {r.stdout.strip()[-200:]}")
+    results.append(("index_collision (a shared hash: the record is checked for the name)", problems))
+
+    # a unit's definition and a library's: through the index the unit's is linked
+    problems = []
+    r = link(exe, p("over_plain.asm"), [p("over_main.s"), p("over_lib.s")])
+    if r.returncode != 200 or "duplicate definition of _f" not in r.stderr:
+        problems.append(f"read whole: status {r.returncode}, {r.stderr.strip()[:200]!r}")
+    subprocess.run([exe, "--index", p("over_lib.s")], capture_output=True)
+    r = link(exe, p("over.asm"), [p("over_main.s"), p("over_lib.s")])
+    out = read(p("over.asm")) or b""
+    if r.returncode or b"ld      hl, 2" not in out or b"ld      hl, 1" in out:
+        problems.append(f"through the index: status {r.returncode}, {r.stderr.strip()[:200]!r}")
+    results.append(("index_override (a unit's name over an indexed library's)", problems))
+
+    # an index of version 1 (no directory) is stale: the .s is read instead
+    problems = []
+    v1 = os.path.join(d, "v1")
+    os.makedirs(v1)
+    for n in ("basic_a.s", "basic_b.s"):
+        shutil.copy(c(n), v1)
+    with open(os.path.join(v1, "basic_b.idx"), "w", newline="\n") as f:
+        f.write(";;agonc-index 1 %d\n" % os.path.getsize(os.path.join(v1, "basic_b.s")))
+    r = link(exe, os.path.join(v1, "basic.asm"), [os.path.join(v1, n) for n in ("basic_a.s", "basic_b.s")],
+             verbose=True)
+    if "does not match" not in r.stdout or "ld: 0 of 2 inputs read through an index" not in r.stdout:
+        problems.append(f"the version-1 index was used: {r.stdout.strip()[-200:]}")
+    if read(os.path.join(v1, "basic.asm")) != read(c("basic.asm.golden")):
+        problems.append("output differs from basic.asm.golden")
+    results.append(("index_version1 (an old index counts as stale)", problems))
 
     # --if-needed: read when something is still undefined, else never opened
     problems = []
@@ -247,7 +298,7 @@ def stage1_case():
     # the device's index records libc.s's size (AgDev's fseek and ftell), so the link read it
     idx = os.path.join(REPO, "emulator_sdcard", "ldstage1", "libc.idx")
     first = open(idx, "rb").readline().decode("ascii", "replace").split() if os.path.exists(idx) else []
-    if first != [";;agonc-index", "1", str(os.path.getsize(RUNTIME[2]))]:
+    if first[:3] != [";;agonc-index", "2", str(os.path.getsize(RUNTIME[2]))]:
         problems.append(f"the device's libc.idx starts {first}")
     return problems
 

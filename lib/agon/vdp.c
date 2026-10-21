@@ -40,6 +40,7 @@
  */
 
 #include <agon/vdp.h>
+#include <agon/mos.h>
 
 extern char __intflag;
 void __interrupted(void);
@@ -106,14 +107,43 @@ static void vdu_words(int cmd, int n, int a, int b, int c, int d)
     vdu_n(x, 1 + 2 * n);
 }
 
+/* ---- AgonDev's output calls (<agon/mos.h>) ------------------------------------------- */
+
+/* n bytes of buf; with n 0, those before the first delimiter, which is
+ * not sent, as MOS's RST 18h does with BC 0 (counted here, so that the
+ * bytes go out through vdu_n like every other command's). */
+void mos_puts(const char *buf, unsigned int n, int delimiter)
+{
+    if (n == 0)
+        while (buf[n] != (char)delimiter)
+            n++;
+    vdu_n(buf, n);
+}
+
+void mos_putstring(const char *s)
+{
+    mos_puts(s, 0, 0);
+}
+
+int putch(int c)
+{
+    vdu(c);
+    return c;
+}
+
 /* ---- the short names ----------------------------------------------------------------- */
 
 /* The short names (vdp_mode, vdp_plot, ...); the AgDev-style names in the
  * sections below send the same bytes, several by calling these. */
 
-void vdp_mode(int mode)
+/* AgonDev's form: the mode back, or -1 and nothing sent for one outside
+ * 0-254. */
+int vdp_mode(int mode)
 {
+    if (mode < 0 || mode >= 255)
+        return -1;
     vdu2(22, mode);
+    return mode;
 }
 
 void vdp_cls(void)
@@ -424,12 +454,14 @@ void vdp_point(int x, int y)
     vdp_plot(69, x, y);
 }
 
-/* A filled triangle from the last two points to x, y (PLOT 85, drawn in
- * the foreground colour). AgDev sends 80, a "move" code that draws
- * nothing (seen on the VDP, tests/visual/vdu_tour.c). */
-void vdp_triangle(int x, int y)
+/* AgonDev's: a triangle's outline, three lines (vdp_filled_triangle fills
+ * one). */
+void vdp_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
 {
-    vdp_plot(85, x, y);
+    vdp_move_to(x1, y1);
+    vdp_line_to(x2, y2);
+    vdp_line_to(x3, y3);
+    vdp_line_to(x1, y1);
 }
 
 /* A circle about the last point, x, y relative to it giving the radius
@@ -439,11 +471,13 @@ void vdp_circle_radius(int x, int y)
     vdp_plot(145, x, y);
 }
 
-/* A circle about the last point through x, y (PLOT 149; AgDev's 148
- * only moves). */
-void vdp_circle(int x, int y)
+/* AgonDev's: a circle's outline about x, y: PLOT 148 moves to the centre,
+ * and 145, relative to it, draws through radius, 0 (vdp_filled_circle
+ * fills one). */
+void vdp_circle(int x, int y, int radius)
 {
-    vdp_plot(149, x, y);
+    vdp_plot(148, x, y);
+    vdp_plot(145, radius, 0);
 }
 
 /* A filled rectangle from the last point to x, y (PLOT 101). */
@@ -496,4 +530,161 @@ void vdp_cursor_tab(int x, int y)
 void vdp_backspace(void)
 {
     vdu(127);
+}
+
+/* ---- AgonDev's shapes (v0.22) ---------------------------------------------------------- */
+
+/* Each as AgonDev's sends it: the corners as moves (PLOT 4), then one PLOT
+ * code, or the outline as lines (PLOT 5). */
+
+void vdp_line(int x1, int y1, int x2, int y2)
+{
+    vdp_move_to(x1, y1);
+    vdp_line_to(x2, y2);
+}
+
+void vdp_rectangle(int x1, int y1, int x2, int y2)
+{
+    vdp_move_to(x1, y1);
+    vdp_line_to(x2, y1);
+    vdp_line_to(x2, y2);
+    vdp_line_to(x1, y2);
+    vdp_line_to(x1, y1);
+}
+
+/* The fourth corner is x1, y1 moved as far as x3, y3 is from x2, y2. */
+void vdp_parallelogram(int x1, int y1, int x2, int y2, int x3, int y3)
+{
+    vdp_move_to(x1, y1);
+    vdp_line_to(x2, y2);
+    vdp_line_to(x3, y3);
+    vdp_line_to(x1 + (x3 - x2), y1 + (y3 - y2));
+    vdp_line_to(x1, y1);
+}
+
+void vdp_filled_rectangle(int x1, int y1, int x2, int y2)
+{
+    vdp_move_to(x1, y1);
+    vdp_plot(101, x2, y2);
+}
+
+/* Two points moved to, then the code that uses them with a third. */
+static void three(int k, int x1, int y1, int x2, int y2, int x3, int y3)
+{
+    vdp_move_to(x1, y1);
+    vdp_move_to(x2, y2);
+    vdp_plot(k, x3, y3);
+}
+
+void vdp_filled_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
+{
+    three(85, x1, y1, x2, y2, x3, y3);
+}
+
+void vdp_filled_parallelogram(int x1, int y1, int x2, int y2, int x3, int y3)
+{
+    three(117, x1, y1, x2, y2, x3, y3);
+}
+
+void vdp_filled_circle(int x, int y, int radius)
+{
+    vdp_plot(156, x, y);
+    vdp_plot(153, radius, 0);
+}
+
+void vdp_arc(int cx, int cy, int x1, int y1, int x2, int y2)
+{
+    three(165, cx, cy, x1, y1, x2, y2);
+}
+
+void vdp_segment(int cx, int cy, int x1, int y1, int x2, int y2)
+{
+    three(173, cx, cy, x1, y1, x2, y2);
+}
+
+void vdp_sector(int cx, int cy, int x1, int y1, int x2, int y2)
+{
+    three(181, cx, cy, x1, y1, x2, y2);
+}
+
+void vdp_copy_rectangle(int x1, int y1, int x2, int y2, int dx, int dy)
+{
+    three(191, x1, y1, x2, y2, dx, dy);
+}
+
+void vdp_move_rectangle(int x1, int y1, int x2, int y2, int dx, int dy)
+{
+    three(189, x1, y1, x2, y2, dx, dy);
+}
+
+/* size is in bytes, as AgonDev's (sizeof the array): nothing is drawn for
+ * an odd count of values or fewer than three points. */
+void vdp_fill_path(const int *path, int size)
+{
+    int n;
+    int i;
+
+    n = size / (int)sizeof(int);
+    if ((n & 1) || n < 6)
+        return;
+    vdp_move_to(path[0], path[1]);
+    vdp_move_to(path[2], path[3]);
+    for (i = 4; i < n; i += 2)
+        vdp_plot(221, path[i], path[i + 1]);
+}
+
+void vdp_dotdash_line(int x1, int y1, int x2, int y2)
+{
+    vdp_move_to(x1, y1);
+    vdp_plot(21, x2, y2);
+}
+
+void vdp_dotdash_line_to(int x, int y)
+{
+    vdp_plot(21, x, y);
+}
+
+void vdp_line_fill_leftright_to_fg(int x, int y)
+{
+    vdp_plot(109, x, y);
+}
+
+void vdp_line_fill_leftright_to_nonbg(int x, int y)
+{
+    vdp_plot(77, x, y);
+}
+
+void vdp_line_fill_right_to_bg(int x, int y)
+{
+    vdp_plot(93, x, y);
+}
+
+void vdp_line_fill_right_to_nonfg(int x, int y)
+{
+    vdp_plot(125, x, y);
+}
+
+void vdp_plot_bitmap(int x, int y)
+{
+    vdp_plot(237, x, y);
+}
+
+void vdp_outchar(int c)
+{
+    vdu2(27, c);
+}
+
+void vdp_set_graphics_fg_colour(int mode, int colour)
+{
+    vdp_gcol(mode, colour);
+}
+
+void vdp_set_graphics_bg_colour(int mode, int colour)
+{
+    vdp_gcol(mode, colour + 128);
+}
+
+void vdp_set_text_bg_colour(int colour)
+{
+    vdu2(17, colour + 128);
 }

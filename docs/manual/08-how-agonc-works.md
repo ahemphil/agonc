@@ -54,8 +54,12 @@ with a simple register model: the value being computed is in `HL` (or `E:UHL`
 for 32 bits), the other operand of a binary operator in `DE`, and anything
 waiting is on the stack. What the eZ80 cannot do in a few instructions (a
 multiplication, a division, anything on `long` or `double`) is a call to the
-runtime. With `-O`, the default, a peephole pass then rewrites short runs of
-instructions into shorter ones. cc2 knows the size of every instruction, so it
+runtime. With `-O`, the default, an `int` or `long` operation with a
+constant operand avoids its helper where a few instructions do the work (a
+shift by a constant, `&`, `|` and `^` with a constant, `/` and `%` by a
+power of two, a `long` compared with a constant),
+and a peephole pass then rewrites short runs of instructions into shorter
+ones. cc2 knows the size of every instruction, so it
 can choose the short jump wherever it reaches and leave the assembler fewer
 labels to keep.
 
@@ -64,8 +68,9 @@ labels to keep.
 one refers to. ld starts from `main` and the start-up code, follows the
 references to find every section the program can reach, orders them, and
 writes them out as one file for ez80asm. Everything else, including most of
-the library, is left out. A library's index (`.idx`) lets ld find its sections
-without reading the whole library. The format is described in
+the library, is left out. A library's index (`.idx`) lists the names the
+library defines, so ld reads just the sections a program needs instead of the
+whole library. The format is described in
 [the object format](../object_format.md).
 
 **The runtime** is `crt0.s`, which starts a program (a stack, zeroed data,

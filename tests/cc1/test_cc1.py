@@ -35,6 +35,8 @@ S1  M3's milestone: on the emulator, the AgDev-built cc1, cc2 and ld and the
     on-device ez80asm compile hello.c and the t_*.c execution tests;
     each runs (exit 42 or 0), and every intermediate file (.ir, .s, .asm)
     equals the host's.
+S1D the AgDev-built cc1 on the emulator rejects an enumerator counted past
+    8388607, and with -Werror a long long overflow, as the host's does.
 """
 import os, re, subprocess, sys
 
@@ -92,6 +94,13 @@ def t1(update):
 # (name, source, flags, expected status, expected lines - each must appear exactly)
 
 DIAG = [
+    # diagnostics made at the unit's end name the file a symbol was declared in (cpp's line markers)
+    ("unused static function in a header",
+     '# 1 "h.h"\nstatic int quiet(void) { return 0; }\n# 3 "d.c"\nint main(void) { return 0; }', [], 0,
+     ["h.h:1: warning: unused static function: quiet"]),
+    ("tentative array in a header",
+     '# 1 "h.h"\nint arr[];\n# 4 "d.c"\nint main(void) { return arr[0]; }', [], 0,
+     ["h.h:1: warning: an array assumed to have one element: arr"]),
     ("undeclared", "int main(void) { return x; }", [], 200, ["d.c:1: error: undeclared identifier x"]),
     ("undeclared call", "int main(void) { foo(); return 0; }", [], 200,
      ["d.c:1: error: call to undeclared function foo"]),
@@ -241,6 +250,57 @@ DIAG = [
     ("enum trailing comma, default mode", "enum e { A, B, };", [], 0, []),
     ("enumerator clash", "int A;\nenum e { A };", [], 200,
      ["d.c:2: error: redeclared as a different kind of symbol: A"]),
+    ("enumerator above int", "enum e { A = 0x800000 };", ["-ansi"], 200,
+     ["d.c:1: error: an enumerator's value does not fit in int (-8388608 to 8388607)"]),
+    ("enumerator: a long beyond int", "enum e { A = 10000000L };", [], 200,
+     ["d.c:1: error: an enumerator's value does not fit in int (-8388608 to 8388607)"]),
+    ("enumerator: -1U is 0xFFFFFF", "enum e { A = -1U };", [], 200,
+     ["d.c:1: error: an enumerator's value does not fit in int (-8388608 to 8388607)"]),
+    ("enumerator counted past 8388607", "enum e { A = 8388607, B };", [], 200,
+     ["d.c:1: error: an enumerator's value does not fit in int (-8388608 to 8388607)"]),
+    ("enumerators at int's ends, and wide constants that fit",
+     "enum e { A = -8388607 - 1, B, C = 8388607, D = 0x7FFFFFL, E = -0x800000L, F = 5ULL };", [], 0, []),
+    ("int overflow in a constant: +", "int a = 8388607 + 1;", ["-ansi"], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("int overflow in a constant: *", "int a = 4096 * 4096;", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("int overflow in a constant: INT_MIN / -1", "int a = (-8388607 - 1) / -1;", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("int overflow in a constant: - INT_MIN", "int a = -(-8388607 - 1);", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("long overflow in a constant", "long a = 65536L * 65536L;", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("long long overflow in a constant: +", "long long a = 9223372036854775807LL + 1LL;", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("long long overflow in a constant: *", "long long a = 3037000500LL * 3037000500LL;", [], 0,
+     ["d.c:1: warning: integer overflow in a constant expression"]),
+    ("constants at their types' ends, and unsigned wrapping",
+     "int a = -8388607 - 1;\nlong b = -2147483647L - 1L;\nlong long c = 3037000499LL * 3037000499LL;\n"
+     "long long d = -9223372036854775807LL - 1LL;\nint e = (-8388607 - 1) % -1;\nunsigned f = 16777215U + 1U;\n"
+     "unsigned long g = 0xFFFFFFFFUL * 2UL;", [], 0, []),
+    ("unary + promotes (sizeof (+c) is sizeof (int))",
+     "char c;\nunsigned char uc;\nshort s;\nint x[sizeof (+c) == sizeof (int) && sizeof (+uc) == sizeof (int)"
+     " && sizeof (+s) == sizeof (int) ? 1 : -1];", ["-ansi"], 0, []),
+    ("unary + promotes a _Bool", "_Bool b;\nint x[sizeof (+b) == sizeof (int) ? 1 : -1];", [], 0, []),
+    ("array parameter qualifiers and static (C99)",
+     "int f(int a[static 3], int b[const], int c[volatile 4], int d[const static 2][5])\n"
+     "{ return a[0] + b[0] + c[1] + d[1][4]; }", [], 0, []),
+    ("an array parameter's const goes to its pointer", "int g(int b[const]) { b = 0; return 0; }", [], 200,
+     ["d.c:1: error: assignment to a const object"]),
+    ("array parameter qualifiers, strict", "int f(int a[static 3]) { return a[0]; }", ["-ansi"], 200,
+     ["d.c:1: error: 'static' or a qualifier in a parameter's brackets (a C99 feature)"]),
+    ("static in a parameter's brackets needs a size", "int f(int a[static]) { return a[0]; }", [], 200,
+     ["d.c:1: error: 'static' in a parameter's brackets needs the array's size"]),
+    ("return of a void expression, default mode", "void h(void);\nvoid k(void) { return h(); }", [], 0,
+     ["d.c:2: warning: 'return' with a void expression in a void function"]),
+    ("return of a void expression, strict", "void h(void);\nvoid k(void) { return h(); }", ["-ansi"], 200,
+     ["d.c:2: error: return with a value in a void function"]),
+    ("a non-constant bit-field initialiser, strict",
+     "struct s { int t : 3; };\nint f(int i) { struct s x = { i }; return x.t; }", ["-ansi"], 200,
+     ["d.c:2: error: initialiser is not a constant"]),
+    ("1023 enumerators", "enum e { " + ", ".join(f"E{i}" for i in range(1023)) + " };", [], 0, []),
+    ("1024 enumerators", "enum e { " + ", ".join(f"E{i}" for i in range(1024)) + " };", [], 200,
+     ["d.c:1: error: more than 1023 enumerators in an enum"]),
     ("block-scope typedef", "int main(void) { typedef int t; t x = 1; return x; }", [], 0, []),
     ("block-scope typedef as a value", "int main(void) { typedef int t; return t; }", [], 200,
      ["d.c:1: error: a type name where a value is expected: t"]),
@@ -692,7 +752,7 @@ def t4_c99():
     rc = subprocess.run([exe]).returncode
     if rc != 0:
         return [f"t_c99 built by the PC: check {rc} failed"]
-    return t4_file("t_c99", "check(f.whole, 1);", "check(f.whole, 16);", 70, 145)
+    return t4_file("t_c99", "check(f.whole, 1);", "check(f.whole, 16);", 70, 158)
 
 
 def t4_m9():
@@ -757,6 +817,29 @@ def s1():
     return problems
 
 
+def s1d():
+    """The AgDev-built cc1 on the emulator rejects what the host's does, for
+    the checks that lean on 24-bit arithmetic: an enumerator counted past
+    8388607 (AgDev's clang once removed that test, taking the signed
+    overflow of v + 1 as impossible) and, with -Werror, a long long product
+    that overflows. A failing command ends the MOS script, so each case has
+    a session of its own, ended by the timeout; the proof is that no .ir is
+    left. The guard: the clean file at both ends of the ranges must leave
+    its .ir, the same way."""
+    problems = []
+    for stem, src, flags, want in (("s1d_ok", "enum e { A = -8388607 - 1, B = 8388607 };\n"
+                                    "long long a = 3037000499LL * 3037000499LL;", " -Werror", True),
+                                   ("s1d_enum", "enum e { A = 8388607, B };", "", False),
+                                   ("s1d_over", "long long a = 3037000500LL * 3037000500LL;", " -Werror", False)):
+        open(os.path.join(REPO, o(stem + ".c")), "w", newline="\n").write(src + "\n")
+        sh([PY, os.path.join("tests", "tools", "run_emulator.py"), "--hold-stdin",
+            "--bin", os.path.join("build", "stage1", "cc1.bin"), "--file", o(stem + ".c"),
+            "--cmd", f"cc1 {stem}.c /{stem}.ir{flags}", "--sdcard-name", "cc1s1d", "--timeout", "30"])
+        if os.path.exists(os.path.join(REPO, "emulator_sdcard", "cc1s1d", stem + ".ir")) != want:
+            problems.append(f"the AgDev-built cc1 {'rejected' if want else 'accepted'} {src!r}")
+    return problems
+
+
 def main():
     os.makedirs(os.path.join(REPO, OUT), exist_ok=True)
     if not os.path.exists(os.path.join(REPO, "build", "agon", "lib", "agonc", "libc.s")):
@@ -779,6 +862,7 @@ def main():
         if "--no-stage1" not in sys.argv:
             cases.append(("S1 AgDev cc1+cc2+ld and device ez80asm build hello.c and t_exec, t_m4, t_m8, t_m9, t_m10, t_m11, t_m13, t_m14, t_ll,"
                           " t_c99 on the emulator", s1))
+            cases.append(("S1D the AgDev-built cc1 rejects an enumerator past 8388607 and a long long overflow", s1d))
     failed = 0
     for name, fn in cases:
         problems = fn()

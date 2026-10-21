@@ -30,13 +30,15 @@
 #ifndef _AGON_VDP_H
 #define _AGON_VDP_H
 
+#include <agon/mos.h>     /* as AgonDev's has it: SYSVAR, and mos_puts for its VDP_PUTS */
+
 /* Raw VDU bytes: one, or n from p (nothing if n <= 0). */
 void vdu(int c);
 void vdu_n(const char *p, int n);
 
 /* ---- the main commands, VDU 0-31 and 127 (vdp.c) -------------------------------------- */
 
-void vdp_mode(int mode);                /* VDU 22: a screen mode */
+int vdp_mode(int mode);                 /* VDU 22: a screen mode; returns it, or -1 (nothing sent) outside 0-254 */
 void vdp_cls(void);                     /* VDU 12: clear the text area */
 void vdp_clg(void);                     /* VDU 16: clear the graphics area */
 void vdp_colour(int c);                 /* VDU 17: text colour (128 + c: background) */
@@ -91,9 +93,9 @@ void vdp_line_to(int x, int y);         /* PLOT 5 */
 void vdp_point(int x, int y);           /* PLOT 69 */
 /* The next three use PLOT codes that draw (85, 145, 149); AgDev's
  * versions send the matching "move" codes, which draw nothing. */
-void vdp_triangle(int x, int y);        /* PLOT 85: filled, with the last two points */
+void vdp_triangle(int x1, int y1, int x2, int y2, int x3, int y3);  /* an outline: three lines */
 void vdp_circle_radius(int x, int y);   /* PLOT 145: about the last point, radius x, y away */
-void vdp_circle(int x, int y);          /* PLOT 149: about the last point, through x, y */
+void vdp_circle(int x, int y, int radius);  /* an outline about x, y: PLOT 148, then 145 */
 void vdp_filled_rect(int x, int y);     /* PLOT 101: from the last point */
 void vdp_reset_viewports(void);         /* VDU 26 */
 void vdp_literal(int c);                /* VDU 27: c as a character, even a control code */
@@ -207,7 +209,7 @@ void vdp_terminal_mode(void);           /* the VDP as a VT100 terminal */
 void vdp_select_bitmap(int n);
 void vdp_load_bitmap(int width, int height, const unsigned long *data);  /* RGBA8888 */
 int vdp_load_bitmap_file(const char *filename, int width, int height);  /* 0, or -1 */
-void vdp_capture_bitmap(int n);         /* the screen between the last two points (VDP 2.2.0) */
+void vdp_capture_bitmap(int top, int left, int bottom, int right, int n);  /* that part of the screen into bitmap n (VDP 2.2.0) */
 void vdp_solid_bitmap(int width, int height, int r, int g, int b, int a);
 void vdp_draw_bitmap(int x, int y);     /* at pixel x, y; PLOT &E8-&EF obeys viewports */
 void vdp_adv_select_bitmap(int buffer);
@@ -271,13 +273,13 @@ void vdp_audio_volume_envelope_disable(int channel);
 void vdp_audio_volume_envelope_ADSR(int channel, int attack, int decay, int sustain, int release);
 /* Multi-phase (VDP 2.5.0): its start only (send the rest with vdu_n), or
  * whole from n bytes of counts and level, duration; pairs. */
-void vdp_audio_volume_envelope_multiphase_ADSR(int channel);
+void vdp_audio_volume_envelope_multiphase_ADSR(int channel, int attacks, int sustains, int releases, const short *data);
 void vdp_audio_volume_envelope_multiphase(int channel, const unsigned char *data, int n);
 void vdp_audio_frequency_envelope_disable(int channel);
 /* Stepped: its start only (phase_count pairs of adjustment; steps; follow
  * with vdu_n), or whole from 2 * phase_count values. control: 1 repeat,
  * 2 cumulative, 4 restricted to 0-65535. */
-void vdp_audio_frequency_envelope_stepped(int channel, int phase_count, int control, int step_length);
+void vdp_audio_frequency_envelope_stepped(int channel, int phase_count, int control, int step_length, const short *data);
 void vdp_audio_frequency_envelope(int channel, int control, int step_length, const int *phases, int phase_count);
 void vdp_audio_enable_channel(int channel);   /* up to 32; 0-2 are on at start-up */
 void vdp_audio_disable_channel(int channel);
@@ -383,5 +385,94 @@ void vdp_tile_layer_scroll(int x, int y, int x_offset, int y_offset);
 void vdp_tile_layer_update(void);
 void vdp_tile_layer_draw(void);
 void vdp_tile_layer_update_draw(void);
+
+/* ---- AgonDev's names (v0.22) ------------------------------------------------------ */
+
+/* AgonDev's <agon/vdp.h> calls that the sections above do not have, so
+ * that its programs build unchanged: shapes drawn whole from their
+ * corners (an outline, or filled), colours, coordinates, sprites, keys.
+ * Each sends what AgonDev's sends. */
+#define VDP_PUTS(S) vdu_n((const char *)&(S), sizeof(S))   /* a structure of bytes, as it is */
+#define BACKGROUND_COL_OFFSET 128
+#define LOAD_BMAP_BLOCK 65535
+#define GCOLMODE_COLOUR         0       /* vdp_gcol's modes */
+#define GCOLMODE_OR             1
+#define GCOLMODE_AND            2
+#define GCOLMODE_EOR            3
+#define GCOLMODE_INVERT         4
+#define GCOLMODE_NOP            5
+#define GCOLMODE_AND_INV_COLOUR 6
+#define GCOLMODE_OR_INV_COLOUR  7
+#define VDP_AUDIO_WAVEFORM_SQUARE       0       /* vdp_audio_set_waveform's waveforms */
+#define VDP_AUDIO_WAVEFORM_TRIANGLE     1
+#define VDP_AUDIO_WAVEFORM_SAWTOOTH     2
+#define VDP_AUDIO_WAVEFORM_SINEWAVE     3
+#define VDP_AUDIO_WAVEFORM_NOISE        4
+#define VDP_AUDIO_WAVEFORM_VICNOISE     5
+#define VDP_AUDIO_SAMPLE_FORMAT_8BIT_SIGNED         0   /* a sample's format */
+#define VDP_AUDIO_SAMPLE_FORMAT_8BIT_UNSIGNED       1
+#define VDP_AUDIO_SAMPLE_FORMAT_SAMPLE_RATE_FOLLOWS 8
+#define VDP_AUDIO_SAMPLE_FORMAT_SAMPLE_TUNEABLE     8
+#define VDP_AUDIO_FREQ_ENVELOPE_CONTROL_REPEATS     1   /* the stepped envelope's control */
+#define VDP_AUDIO_FREQ_ENVELOPE_CONTROL_CUMULATIVE  2
+#define VDP_AUDIO_FREQ_ENVELOPE_CONTROL_RESTRICT    4
+
+void vdp_line(int x1, int y1, int x2, int y2);
+void vdp_rectangle(int x1, int y1, int x2, int y2);        /* outlines */
+void vdp_parallelogram(int x1, int y1, int x2, int y2, int x3, int y3);
+void vdp_filled_rectangle(int x1, int y1, int x2, int y2); /* filled: PLOT 101 */
+void vdp_filled_triangle(int x1, int y1, int x2, int y2, int x3, int y3);       /* PLOT 85 */
+void vdp_filled_parallelogram(int x1, int y1, int x2, int y2, int x3, int y3);  /* PLOT 117 */
+void vdp_filled_circle(int x, int y, int radius);           /* PLOT 156, then 153 */
+/* Arcs, segments and sectors about a centre, from x1, y1 to x2, y2. */
+void vdp_arc(int cx, int cy, int x1, int y1, int x2, int y2);       /* PLOT 165 */
+void vdp_segment(int cx, int cy, int x1, int y1, int x2, int y2);   /* PLOT 173 */
+void vdp_sector(int cx, int cy, int x1, int y1, int x2, int y2);    /* PLOT 181 */
+/* The rectangle x1, y1 to x2, y2 copied or moved to dx, dy (PLOT 191, 189). */
+void vdp_copy_rectangle(int x1, int y1, int x2, int y2, int dx, int dy);
+void vdp_move_rectangle(int x1, int y1, int x2, int y2, int dx, int dy);
+/* A filled path through the points in path: size is its size in bytes
+ * (sizeof the array), at least three x, y pairs (PLOT 221). */
+void vdp_fill_path(const int *path, int size);
+void vdp_dotdash_line(int x1, int y1, int x2, int y2);    /* PLOT 21 */
+void vdp_dotdash_line_to(int x, int y);
+void vdp_set_dotdash_line_pattern(int b0, int b1, int b2, int b3, int b4, int b5, int b6, int b7);  /* VDU 23, 6 */
+void vdp_set_dotdash_pattern_length(int n);                 /* 0-64: VDU 23, 0, &F2 */
+/* Line fills from x, y: left and right to the foreground colour, or to
+ * anything but the background; right to the background, or to anything
+ * but the foreground (PLOT 109, 77, 93, 125). */
+void vdp_line_fill_leftright_to_fg(int x, int y);
+void vdp_line_fill_leftright_to_nonbg(int x, int y);
+void vdp_line_fill_right_to_bg(int x, int y);
+void vdp_line_fill_right_to_nonfg(int x, int y);
+void vdp_plot_bitmap(int x, int y);                         /* the current bitmap at x, y: PLOT 237 */
+void vdp_outchar(int c);                                    /* VDU 27: c as a character, whatever it is */
+void vdp_set_graphics_fg_colour(int mode, int colour);      /* VDU 18 */
+void vdp_set_graphics_bg_colour(int mode, int colour);      /* VDU 18, colour + 128 */
+void vdp_set_text_bg_colour(int colour);                    /* VDU 17, colour + 128 */
+void vdp_set_logical_coordinates(void);                     /* VDU 23, 0, &C0, 1 */
+void vdp_set_pixel_coordinates(void);                       /* VDU 23, 0, &C0, 0 */
+void vdp_set_hardware_sprite(void);                         /* VDU 23, 27, 19 */
+void vdp_set_software_sprite(void);                         /* VDU 23, 27, 20 */
+void vdp_mouse_set_bitmap(int hotx, int hoty);              /* the current bitmap as the mouse cursor */
+void vdp_copper_enable(void);
+void vdp_copper_disable(void);
+void vdp_audio_play_sample(int channel, int volume);
+/* num sprite frames of width x height RGBA8888 pixels from files named by
+ * format with prefix and the frame number (as sprintf(name, format,
+ * prefix, i), at most 31 characters), into bitmaps from bitmap_num on;
+ * returns how many were loaded. The adv form numbers the bitmaps as
+ * buffers (vdp_adv_select_bitmap). */
+int vdp_load_sprite_bitmaps(const char *prefix, const char *format, int width, int height, int num, int bitmap_num);
+int vdp_adv_load_sprite_bitmaps(const char *prefix, const char *format, int width, int height, int num, int bitmap_num);
+/* Keys from the system variables: the key held now (its ASCII code, 0 if
+ * none), byte i of MOS's keyboard map, and waits for a key to go down or
+ * for every key to be up. */
+int vdp_getKeyCode(void);
+int vdp_getKeyMap(int i);
+void vdp_waitKeyDown(void);
+void vdp_waitKeyUp(void);
+/* The system variables (AgonDev's start-up step): sys_vars. */
+volatile SYSVAR *vdp_vdu_init(void);
 
 #endif

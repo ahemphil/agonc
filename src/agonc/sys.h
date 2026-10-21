@@ -54,17 +54,28 @@ unsigned sys_clock(void);
 void sys_date(char *date, char *time);
 
 /* File operations: a file's size (-1 if it cannot be opened); up to max
- * bytes of it into buf (the count, or -1); whether the file holds text or
- * text2 (two strings of one length under 64 that start with the same
- * character, 0 if it cannot be opened); a whole file written from a
- * string (1 on success); remove; make a directory (errors ignored); copy a
- * file to the console (0 if it cannot be opened). */
+ * bytes of it from offset on into buf (the count, 0 past the end, or -1);
+ * whether the file holds text or text2 (two strings of one length under
+ * 64 that start with the same character, 0 if it cannot be opened); a
+ * whole file written from a string (1 on success); n files joined into
+ * one, out (1 on success); remove; make a directory (errors ignored); copy
+ * a file to the console (0 if it cannot be opened). */
 int sys_size(char *path);
-int sys_read(char *path, char *buf, int max);
+int sys_read(char *path, int offset, char *buf, int max);
 int sys_find(char *path, char *text, char *text2);
 int sys_write(char *path, char *text);
+int sys_join(char *out, char **files, int n);
 void sys_remove(char *path);
 void sys_mkdir(char *path);
 int sys_cat(char *path);
+
+/* The files in folder dir ("" for the current one), for wildcards: after
+ * sys_dir_open (0 if the folder cannot be read), each sys_dir_next puts
+ * the next file's name (folders are left out) into name, at most max
+ * bytes with its 0, and returns 1; 0 at the end. Names longer than max
+ * are left out. One listing at a time; sys_dir_close ends it. */
+int sys_dir_open(char *dir);
+int sys_dir_next(char *name, int max);
+void sys_dir_close(void);
 
 #endif

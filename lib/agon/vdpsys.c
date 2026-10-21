@@ -585,3 +585,100 @@ void vdp_terminal_mode(void)
 {
     sys(0xFF, 0, 0, 0, 0);
 }
+
+/* ---- AgonDev's names (v0.22) --------------------------------------------------------- */
+
+void vdp_set_logical_coordinates(void)
+{
+    char b[4];
+
+    b[0] = 23;
+    b[1] = 0;
+    b[2] = (char)0xC0;
+    b[3] = 1;
+    vdu_n(b, 4);
+}
+
+void vdp_set_pixel_coordinates(void)
+{
+    char b[4];
+
+    b[0] = 23;
+    b[1] = 0;
+    b[2] = (char)0xC0;
+    b[3] = 0;
+    vdu_n(b, 4);
+}
+
+/* VDU 23, 6: the dot-dash pattern's eight bytes. */
+void vdp_set_dotdash_line_pattern(int b0, int b1, int b2, int b3, int b4, int b5, int b6, int b7)
+{
+    char b[10];
+
+    b[0] = 23;
+    b[1] = 6;
+    b[2] = b0;
+    b[3] = b1;
+    b[4] = b2;
+    b[5] = b3;
+    b[6] = b4;
+    b[7] = b5;
+    b[8] = b6;
+    b[9] = b7;
+    vdu_n(b, 10);
+}
+
+/* VDU 23, 0, &F2, n; nothing for n over 64, as AgonDev's. */
+void vdp_set_dotdash_pattern_length(int n)
+{
+    char b[4];
+
+    if (n > 64)
+        return;
+    b[0] = 23;
+    b[1] = 0;
+    b[2] = (char)0xF2;
+    b[3] = n;
+    vdu_n(b, 4);
+}
+
+/* The key held now, from the system variables: its ASCII code, or 0 when
+ * no key is down. */
+int vdp_getKeyCode(void)
+{
+    volatile struct mos_sysvar *v;
+
+    v = MOS_SYSVAR;
+    return v->vkeydown ? v->keyascii : 0;
+}
+
+/* Byte i of MOS's keyboard map (mos_getkbmap). */
+int vdp_getKeyMap(int i)
+{
+    return mos_getkbmap()[i];
+}
+
+void vdp_waitKeyDown(void)
+{
+    volatile struct mos_sysvar *v;
+
+    v = MOS_SYSVAR;
+    while (v->vkeydown == 0)
+        ;
+}
+
+void vdp_waitKeyUp(void)
+{
+    volatile struct mos_sysvar *v;
+
+    v = MOS_SYSVAR;
+    while (v->vkeydown != 0)
+        ;
+}
+
+/* AgonDev's start-up step, which there sets sys_vars: here sys_vars is
+ * always ready, and this returns it. */
+volatile SYSVAR *vdp_vdu_init(void)
+{
+    return sys_vars;
+}

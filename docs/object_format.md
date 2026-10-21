@@ -91,12 +91,21 @@ and reference list. Record every `;;label`. Build:
   kind with the same assembly name;
 - the reference graph: section → referenced symbols.
 
+A library with a current index (section 9) is not read this way: only its
+units and the directory of the names it defines are read, and a section
+of it enters the tables when pass 2 needs it.
+
 **Pass 2, select.** Starting from the roots (`__start`, plus `--entry`
 symbols), walk the
-graph and mark reachable sections. Unresolved references in reachable
-sections are "undefined symbol" errors, reported with the referencing unit
-and section. Unreachable sections are dropped: this is what lets a library
-be one big file.
+graph and mark reachable sections. A name that nothing read so far
+defines is looked up in the indexed libraries' directories, in command
+order, and the section defining it is loaded from the index and marked in
+turn. Unresolved references in reachable sections are "undefined symbol"
+errors, reported with the referencing unit and section. Unreachable
+sections are dropped: this is what lets a library be one big file. The
+selected sections are then put in input order (the order the files were
+read in, and the order of the sections within each), whichever came from
+an index, so passes 3 and 4 give the same output either way.
 
 **Pass 3, order.** Topologically sort the selected `code` sections so that
 every callee precedes its callers (depth-first post-order over the
@@ -159,13 +168,15 @@ thousand symbols this is well under 200 KB; a `-v` report prints the peak.
 
 ## 5. Libraries
 
-`agonc -c foo.c bar.c` produces `foo.s` and `bar.s`. A library is made with
-plain concatenation (`copy foo.s+bar.s libx.s` on MOS, `cat` on the host);
-`ld` treats each `;;unit` block independently, and dead-section removal
-means a program pays only for what it calls. Libraries live in the
-directories listed in `driver.md` and are found with `-lx` as `libx.s`.
-`agonc --index libx.s` writes `libx.idx` beside it, which makes every
-link that uses the library faster (section 9).
+`agonc -c foo.c bar.c` produces `foo.s` and `bar.s`. A library is their
+plain concatenation; `ld` treats each `;;unit` block independently, and
+dead-section removal means a program pays only for what it calls. MOS has
+no command that joins files, so `agonc --lib -o libx.s foo.c bar.c` does
+it all: compiles, joins and indexes (driver.md §3); on a PC `cat` joins
+too. Libraries live in the directories listed in `driver.md` and are
+found with `-lx` as `libx.s`. `agonc --index libx.s` writes `libx.idx`
+beside it, which makes every link that uses the library faster and takes
+only the sections a program uses (section 9).
 
 ## 6. Example
 
@@ -245,39 +256,77 @@ other data; nothing in the format changes.
 ## 9. Library indexes
 
 On the Agon, most of a link's time went to pass 1 reading the whole of
-`libc.s` (and `libm.s`), and to pass 4 writing the output line by line.
-An index removes the first; clean sections remove the second.
+`libc.s` (and `libm.s`), and to pass 4 writing the output line by line;
+and every section of every library took room in `ld`'s tables, used or
+not. An index removes the first and the third; clean sections remove the
+second.
 
 **The index.** `ld --index lib.s...` (or `agonc --index lib.s...`) runs pass
 1 over each file on its own and writes `lib.idx` beside it (`.s` replaced
-by `.idx`): the file's markers alone, without the bodies, each section
-followed by an `;;at` line.
+by `.idx`): the file's markers alone, without the bodies, as the file's
+units and then a record for each section, followed by a directory of the
+names the file defines.
 
 ```
-;;agonc-index 1 <size of lib.s in bytes>
+;;agonc-index 2 <size of lib.s> <directory's offset> <its entries>
 ;;unit ctype.c
+;;unit stdio.c
+;;wref ___fp_print
+...
+;;in 0
 ;;sect code _isdigit g
-;;at 37 60 326 1
+;;at 37 68 326 1
 ;;ret i
+;;in 0
+;;sect code _isupper g
+...
+;;dir
+0003 17267
+003b 13158
 ...
 ```
 
-`;;at <mark> <start> <end> <clean>` gives the offsets in `lib.s` of the
-section's `;;sect` line, of the first body line pass 4 copies, and of the
-section's end, and whether the section is clean (below). Bare labels
-appear as `;;label` lines; `;;ref`, `;;ret`, `;;implicit` and `;;wref`
-as in the `.s`. `;;at` anywhere but an index is an error.
+The units come first, each with its `;;wref` lines. A section's record
+starts with `;;in <n>`, its unit's number in the file (from 0), and runs
+to the next `;;in` or to `;;dir`. `;;at <mark> <start> <end> <clean>`
+gives the offsets in `lib.s` of the section's `;;sect` line, of the first
+body line pass 4 copies, and of the section's end, and whether the section
+is clean (below). Bare labels appear as `;;label` lines; `;;ref`, `;;ret`
+and `;;implicit` as in the `.s`. `;;at` and `;;in` anywhere but an index
+are errors.
+
+The directory has an entry for every name the file defines (each
+section's own and each label): the name's hash, the low 16 bits of its
+FNV-1a hash as for unit ids (section 2), in four hex digits, and the
+offset in the index of the record of the section defining it. Entries are
+sorted by hash, then by offset. The first line gives the directory's
+offset and length in fixed widths (8 and 5 digits), so that its own length
+is known before they are.
 
 **Using it.** For every input `x.s`, `ld` looks for `x.idx`. If its first
-line records the version 1 and `x.s`'s present size, pass 1 reads the
-index instead of `x.s`; otherwise (`-v` says so) it reads `x.s` as usual,
-so a stale index costs time, never a wrong link. Pass 4 checks each
-section's `;;sect` line at `<mark>` before copying, so an index made from a
-different file of the same size is an error ("`x.idx` does not match
-`x.s`"), reported once. The output is byte-identical with and without
-indexes. The bootstrap and `make cross` index `crt0.s`, `rt.s`, `libc.s`
-and `libm.s` in `/lib/agonc`; `-v` reports how many inputs were read through an
-index.
+line records version 2 and `x.s`'s present size, pass 1 reads only the
+units and the directory; otherwise (`-v` says so) it reads `x.s` as usual,
+so a stale index costs time, never a wrong link. An index of version 1,
+which had no directory, counts as stale. In pass 2, a name nothing read so
+far defines is looked up by its hash in the directories, in command
+order; since two names can share a hash, the candidate record is read and
+checked for the name before it is loaded. The lookups are made in rounds,
+each reading the records it needs in file order. So the tables hold the
+program's own sections and only the library sections it uses.
+
+Pass 4 checks each section's `;;sect` line at `<mark>` before copying, so
+an index made from a different file of the same size is an error
+("`x.idx` does not match `x.s`"), reported once. The output is
+byte-identical with and without indexes. The bootstrap and `make cross`
+index `crt0.s`, `rt.s`, `libc.s`, `libm.s` and `libagon.s` in
+`/lib/agonc`; `-v` reports how many inputs were read through an index and
+how many sections were loaded from indexes.
+
+One thing differs with an index: a name that both a unit and an indexed
+library define is no error unless the library's section is loaded for
+another of its names. The unit's definition satisfies the program, and the
+library's is never read, as with other linkers' libraries. Read whole, a
+library's every definition is checked, and the same name is a duplicate.
 
 **Clean sections.** Pass 4 drops full-line comments and blank lines. A
 section whose body has none of them after its first instruction (and no
@@ -292,11 +341,15 @@ the file each time it is read or indexed.
 (or its index) only if, once the other inputs are read, the sections
 reachable from the roots (`__start` and `--entry`) still make a strong
 reference to an undefined symbol; several such libraries are tried in
-order. Reading even an index costs time on the Agon (about 0.8 s for
-`libc.idx`), and a program that uses nothing in a library should not
-pay it. The driver passes `/lib/agonc/libagon.s` this way. `-v` reports how
-many were read.
+order. Opening even an index and reading its directory costs time on the
+Agon, and a program that uses nothing in a library should not pay it. The
+driver passes `/lib/agonc/libagon.s` this way. `-v` reports how many were
+read.
 
-Measured on the emulator at the Agon's speed: `ld` for a
-hello-world program 5.6 s to 2.0 s, for a floating-point program 16.7 s
-to 5.1 s; whole compiles 30 to 45% faster.
+Measured on the emulator at the Agon's speed: version 1's indexes took
+`ld` for a hello-world program from 5.6 s to 2.0 s, for a floating-point
+program from 16.7 s to 5.1 s, whole compiles 30 to 45% faster. Version 2's
+directories (2026-10-19), against version 1 with the compiler of that
+day: hello world's `ld` 1.28 s to 1.22 s, the floating-point program's
+4.04 s to 3.34 s. Their larger gain is room: a program built from big
+libraries no longer fills `ld`'s tables with their unused sections.

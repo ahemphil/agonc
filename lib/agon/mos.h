@@ -12,6 +12,12 @@
  * agon_emu_exit. The calls MOS 3 added are not here: programs built with
  * this header run on MOS 2.3.3 and on MOS 3. Not part of C89.
  *
+ * The names follow AgonDev's <agon/mos.h> (v0.22), the toolchain most Agon
+ * programs come from, so that its programs build unchanged: its functions
+ * that MOS 2.3.3 has, in its argument order (int where it has uint8_t),
+ * its sysvar_ offsets and flags, and its SYSVAR structure (below).
+ * struct mos_sysvar and MOS_SYSVAR are agonc's own way to the same.
+ *
  * Several comments below note behaviour confirmed only on
  * fab-agon-emulator 1.2.5's host-folder SD card (the only environment
  * this project currently tests against) that traces to bugs in the
@@ -25,10 +31,15 @@
 #ifndef _AGON_MOS_H
 #define _AGON_MOS_H
 
+#ifndef __STRICT_ANSI__
+#include <stdint.h>     /* as AgonDev's has it; -ansi's C89 has no <stdint.h> names */
+#endif
+
 /* mos_fopen's and ffs_fopen's mode bits: FA_READ, FA_WRITE or both, with
  * at most one of the others (0, opening an existing file, by default). */
 #define FA_READ           0x01
 #define FA_WRITE          0x02
+#define FA_OPEN_EXISTING  0x00
 #define FA_CREATE_NEW     0x04
 #define FA_CREATE_ALWAYS  0x08
 #define FA_OPEN_ALWAYS    0x10
@@ -100,8 +111,10 @@ int mos_load(const char *filename, void *address, unsigned int maxsize);
  * least 32 bytes); returns its length. */
 int mos_getrtc(char *buf);
 
-/* Run a MOS command line, as typed at the prompt; returns the status. */
-int mos_oscli(const char *command);
+/* Run a MOS command line, as typed at the prompt; returns the status.
+ * AgonDev's form: argv and argc go to MOS in BC and DE, which MOS 2.3.3
+ * does not use (pass NULL and 0). */
+int mos_oscli(const char *command, char **argv, int argc);
 
 /* The address of MOS's system variables block (MOS_SYSVAR below gives
  * it a structure). */
@@ -288,14 +301,15 @@ typedef struct {            /* a file's details */
 
 int ffs_fopen(FIL *fp, const char *path, int mode);  /* mode: FA_ bits, as mos_fopen */
 int ffs_fclose(FIL *fp);
-/* Read or write count bytes; *done (if done is not null) gets the count
- * transferred, short at the end of the file or when the disk is full. */
-int ffs_fread(FIL *fp, void *buf, unsigned int count, unsigned int *done);
-int ffs_fwrite(FIL *fp, const void *buf, unsigned int count, unsigned int *done);
+/* Read or write count bytes; returns the count transferred, short at the
+ * end of the file or when the disk is full (AgonDev's form: MOS's status
+ * is not returned). */
+unsigned int ffs_fread(FIL *fp, void *buf, unsigned int count);
+unsigned int ffs_fwrite(FIL *fp, const void *buf, unsigned int count);
 int ffs_flseek(FIL *fp, unsigned long offset);       /* from the start */
 int ffs_ftruncate(FIL *fp);                          /* the file ends at its position */
 int ffs_feof(FIL *fp);                               /* 1 at the end, else 0 */
-int ffs_stat(const char *path, FILINFO *info);
+int ffs_stat(FILINFO *info, const char *path);     /* in MOS's order, as AgonDev has it */
 int ffs_dopen(DIR *dp, const char *path);
 int ffs_dclose(DIR *dp);
 /* The next entry into info; at the end, FR_OK with info->fname "". */
@@ -374,5 +388,139 @@ volatile unsigned char *getsysvar_rtc(void);
 unsigned int getsysvar_keydelay(void);
 unsigned int getsysvar_keyrate(void);
 int getsysvar_keyled(void);
+unsigned int getsysvar_mouseX(void);
+unsigned int getsysvar_mouseY(void);
+int getsysvar_mouseButtons(void);
+int getsysvar_mouseWheel(void);             /* -128 to 127 */
+int getsysvar_mouseXDelta(void);            /* -32768 to 32767 */
+int getsysvar_mouseYDelta(void);
+
+/* ---- AgonDev's names (v0.22) ------------------------------------------------------- */
+
+/* The system variables' offsets, for mos_sysvars()[sysvar_cursorX] and the
+ * like (syscar_audioSuccess is AgonDev's spelling), and the VDP reply
+ * flags in sysvar_vdp_pflags (VDP_PFLAG_ in <agon/vdp.h> are the same). */
+#define sysvar_time             0x00
+#define sysvar_vdp_pflags       0x04
+#define sysvar_keyascii         0x05
+#define sysvar_keymods          0x06
+#define sysvar_cursorX          0x07
+#define sysvar_cursorY          0x08
+#define sysvar_scrchar          0x09
+#define sysvar_scrpixel         0x0A
+#define sysvar_audioChannel     0x0D
+#define sysvar_audioSuccess     0x0E
+#define syscar_audioSuccess     0x0E
+#define sysvar_scrWidth         0x0F
+#define sysvar_scrHeight        0x11
+#define sysvar_scrCols          0x13
+#define sysvar_scrRows          0x14
+#define sysvar_scrColours       0x15
+#define sysvar_scrpixelIndex    0x16
+#define sysvar_vkeycode         0x17
+#define sysvar_vkeydown         0x18
+#define sysvar_vkeycount        0x19
+#define sysvar_rtc              0x1A
+#define sysvar_spare            0x20
+#define sysvar_keydelay         0x22
+#define sysvar_keyrate          0x24
+#define sysvar_keyled           0x26
+#define sysvar_scrMode          0x27
+#define sysvar_rtcEnable        0x28
+#define sysvar_mouseX           0x29
+#define sysvar_mouseY           0x2B
+#define sysvar_mouseButtons     0x2D
+#define sysvar_mouseWheel       0x2E
+#define sysvar_mouseXDelta      0x2F
+#define sysvar_mouseYDelta      0x31
+#define sysvar_gp               0x37
+#define vdp_pflag_cursor        0x01
+#define vdp_pflag_scrchar       0x02
+#define vdp_pflag_point         0x04
+#define vdp_pflag_audio         0x08
+#define vdp_pflag_mode          0x10
+#define vdp_pflag_rtc           0x20
+#define vdp_pflag_mouse         0x40
+
+/* mos_i2c_open's frequencies, and mos_i2c_read's and mos_i2c_write's results. */
+#define I2C_SPEED_57600         0x01
+#define I2C_SPEED_115200        0x02
+#define I2C_SPEED_230400        0x03
+#define RET_OK                  0x00
+#define RET_NORESPONSE          0x01
+#define RET_DATA_NACK           0x02
+#define RET_ARB_LOST            0x04
+#define RET_BUS_ERROR           0x08
+
+/* A FatFs result: FR_OK and the rest, as above. */
+typedef int FRESULT;
+
+/* The clock in the system variables, as AgonDev has it. */
+typedef struct {
+    unsigned char year;         /* since 1980 */
+    unsigned char month;        /* 0-11 */
+    unsigned char day;          /* 1-31 */
+    unsigned char hour;
+    unsigned char minute;
+    unsigned char second;
+} SYSVAR_RTCDATA;
+
+/* The system variables as AgonDev's SYSVAR has them, field for field (its
+ * scrpixel is a union with three byte fields, scrpixelR, B and G, which
+ * need C11's anonymous structures: here it is the 24-bit value alone, R
+ * lowest). sys_vars points at them, as AgonDev's start-up code sets it. */
+typedef struct {
+    unsigned long time;
+    unsigned char vdp_pflags;
+    unsigned char keyascii;
+    unsigned char keymods;
+    unsigned char cursorX;
+    unsigned char cursorY;
+    unsigned char scrchar;
+    unsigned int scrpixel;
+    unsigned char audioChannel;
+    unsigned char audioSuccess;
+    unsigned short scrWidth;
+    unsigned short scrHeight;
+    unsigned char scrCols;
+    unsigned char scrRows;
+    unsigned char scrColours;
+    unsigned char scrpixelIndex;
+    unsigned char vkeycode;
+    unsigned char vkeydown;
+    unsigned char vkeycount;
+    SYSVAR_RTCDATA rtc;
+    unsigned short spare;
+    unsigned short keydelay;
+    unsigned short keyrate;
+    unsigned char keyled;
+    unsigned char scrMode;
+    unsigned char rtcEnable;
+    unsigned short mouseX;
+    unsigned short mouseY;
+    unsigned char mouseButtons;
+    unsigned char mouseWheel;
+    unsigned short mouseXDelta;
+    unsigned short mouseYDelta;
+} SYSVAR;
+
+#define sys_vars ((volatile SYSVAR *)mos_sysvars())
+
+/* Output to the VDP: n bytes of buf, or with n 0 the bytes before the first
+ * delimiter (as MOS's RST 18h does with BC 0); a string; one character
+ * (vdp.c, through vdu_n and vdu). */
+void mos_puts(const char *buf, unsigned int n, int delimiter);
+void mos_putstring(const char *s);
+int putch(int c);                           /* returns c */
+
+/* A key, waiting for one: mos_getkey. */
+int getch(void);
+
+/* Waits for the next vertical blank (the clock's next tick). */
+void waitvblank(void);
+
+/* A byte from UART1 if one has arrived (0-255), else -1 at once: the
+ * UART's registers read directly, not a MOS call. */
+int mos_ugetc_nb(void);
 
 #endif

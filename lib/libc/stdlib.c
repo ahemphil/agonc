@@ -501,7 +501,7 @@ int system(const char *string)
 {
     if (string == NULL)
         return 1;
-    return mos_oscli(string);
+    return mos_oscli(string, NULL, 0);
 }
 
 /* ---- multibyte characters: in the "C" locale, one byte each ------------------- */

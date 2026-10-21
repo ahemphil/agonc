@@ -7,14 +7,18 @@ The suites are fetched by fetch_suites.py into third_party/suites/ (not in
 git); this script skips cleanly when one is missing. Which tests count is
 fixed in git by the skip lists in skip/: <suite>.txt, generated from the
 classifier (classify.py) by --update-skips, and <suite>.manual.txt, added
-by hand. Every line names a test and why it is skipped. Every other test is
+by hand. Every line names a test (or, for SDCC, one instance of a template
+by its generated name) and why it is skipped. Every other test is
 attempted: compiled with the host driver against the test runtime
 (tests/tools/testrun.py) and run on the emulator. A C89 test is compiled in
 strict mode (-ansi, the conforming mode: c89_spec.md section 1), which it
 must pass; one that is not C89 in the default mode: the classifier's
-tests with // comments or GNU spellings (GNU_soft), those whose only later
-standard is C99's long long (which the default mode has), and those
-listed with their reasons in skip/<suite>.default.txt. Each result line
+tests with // comments, GNU spellings (GNU_soft) or a later standard, and
+those listed with their reasons in skip/<suite>.default.txt. Such a test
+is judged by the classification made with the default mode's predefined
+macros (<suite>_c99.csv: __STDC_VERSION__ 199901L picks its #if branches)
+and skipped only for a part of C99 the default mode lacks (C99_HAVE,
+HEADERS_MISSING, FUNCS_MISSING) or for another category. Each result line
 gives the mode, and the summary counts each mode apart.
 
   ctest  c-testsuite: passes when it exits 0 and prints exactly its
@@ -54,35 +58,84 @@ TESTS = {
 CATEGORIES = ("C99", "GNU_hard", "INT32", "ENV")
 INFO = {"file", "lines", "C99", "GNU_hard", "GNU_soft", "INT32", "FLOAT", "ENV", "includes", "lib_funcs",
         "lib_headers", "notes", "max_static_bytes", "sdcc_test_funcs", "line_comments", "pp_uncertain"}
-# The classifier's C99 flags for long long, which the default mode provides.
-LONG_LONG = {"c99_long_long", "c99_long_long_suffix", "c99_huge_const"}
+# The classifier's flags for the C99 the default mode provides (all of it
+# but variable-length arrays, complex numbers, array parameter qualifiers,
+# universal character names in identifiers and the wide-character
+# library); a header or a library function flag counts only when every
+# header or function behind it is one agonc has.
+C99_HAVE = {"c99_long_long", "c99_long_long_suffix", "c99_huge_const", "c99_bool", "c99_inline",
+            "c99_restrict", "c99_func", "c99_variadic_macro", "c99_hex_float", "c99_pragma_op", "c99_ucn",
+            "c99_designated_init", "c99_compound_literal", "c99_flexible_array_member", "c99_for_decl",
+            "c99_mixed_decl_code", "c99_printf_len", "c99_header", "c95_header", "c99_libfunc",
+            "dg_std_c99plus"}
+HEADERS_MISSING = {"complex.h", "fenv.h", "tgmath.h", "wchar.h", "wctype.h", "stdalign.h", "stdatomic.h",
+                   "stdnoreturn.h", "threads.h", "uchar.h", "stdckdint.h", "stdbit.h"}
+FUNCS_MISSING = {"wcstoll", "aligned_alloc", "quick_exit", "at_quick_exit", "timespec_get", "strnlen",
+                 "strdup", "memccpy"}
 
 
 def later_standard(row):
     """The classifier's flags for a later standard than C89 (its C99
     category) that a row has."""
     return {k for k, v in row.items() if v not in ("", "0", None)
-            and (k.startswith(("c99_", "c11_", "c23_")) or k in ("c95_header", "dg_std_c99plus"))}
+            and (k.startswith(("c99_", "c11_", "c23_")) or k in ("c95_header", "dg_std_c99plus", "dg_std_c11plus"))}
 
 
-def long_long_only(row):
-    """Is C99's long long the only later standard a row uses?"""
-    flags = later_standard(row)
-    return bool(flags) and flags <= LONG_LONG
+def c99_ok(row):
+    """Is all the later standard a row (classified as the default mode
+    sees it) uses one the default mode provides?"""
+    if not later_standard(row) <= C99_HAVE:
+        return False
+    if set(row.get("includes", "").split()) & HEADERS_MISSING:
+        return False
+    funcs = set()
+    for part in row.get("notes", "").split():
+        if part.startswith("c99_libfuncs="):
+            funcs = set(part[len("c99_libfuncs="):].split(","))
+    return not funcs & FUNCS_MISSING
+
+
+def table(suite, c99=False):
+    """The classifier's rows for a suite by file (c99: as the default mode
+    sees it), or None if it has not been run."""
+    path = os.path.join(SUITES, "out", suite + ("_c99" if c99 else "") + ".csv")
+    return {row["file"]: row for row in csv.DictReader(open(path))} if os.path.exists(path) else None
+
+
+def needs_default(row):
+    """Is a row (as strict mode sees it) not C89: a later standard, //
+    comments (which strict mode, as C89 requires, does not take as
+    comments) or GNU spellings?"""
+    return bool(later_standard(row)) or any(row.get(k) not in ("", "0", None) for k in ("line_comments", "GNU_soft"))
+
+
+def listed_default(suite):
+    names = set()
+    path = os.path.join(SKIP, suite + ".default.txt")
+    if os.path.exists(path):
+        for line in open(path):
+            if line.strip() and not line.startswith("#"):
+                names.add(line.split()[0])
+    return names
 
 
 def update_skips():
-    """Regenerate skip/<suite>.txt from the classifier's CSVs."""
+    """Regenerate skip/<suite>.txt from the classifier's CSVs: a test that
+    strict mode can take is judged as strict mode sees it; any other, as
+    the default mode sees it (<suite>_c99.csv), and skipped only for a
+    part of C99 the default mode lacks, or for the other categories."""
     os.makedirs(SKIP, exist_ok=True)
     for suite in TESTS:
-        table = os.path.join(SUITES, "out", suite + ".csv")
-        if not os.path.exists(table):
-            print(f"{suite}: no classifier output (run fetch_suites.py): left alone")
+        c89, c99 = table(suite), table(suite, True)
+        if c89 is None or c99 is None:
+            print(f"{suite}: no classifier output, or none for the default mode (run fetch_suites.py): left alone")
             continue
+        listed = listed_default(suite)
         lines = []
-        for row in csv.DictReader(open(table)):
+        for name, strict_row in c89.items():
+            row = c99.get(name, strict_row) if needs_default(strict_row) or name in listed else strict_row
             cats = [c for c in CATEGORIES if row.get(c) not in ("", "0", None)
-                    and not (c == "C99" and long_long_only(row))]
+                    and not (c == "C99" and c99_ok(row))]
             no_checks = row.get("no_checks") not in ("", "0", None)
             if not cats and not no_checks:
                 continue
@@ -101,22 +154,11 @@ def update_skips():
 
 
 def default_mode(suite):
-    """The test files that are not C89, and so run in the default mode: the
-    classifier's with // comments (which strict mode, as C89 requires, does
-    not take as comments), GNU spellings or long long, and
-    skip/<suite>.default.txt's."""
-    names = set()
-    table = os.path.join(SUITES, "out", suite + ".csv")
-    if os.path.exists(table):
-        for row in csv.DictReader(open(table)):
-            if any(row.get(k) not in ("", "0", None) for k in ("line_comments", "GNU_soft")) or long_long_only(row):
-                names.add(row["file"])
-    path = os.path.join(SKIP, suite + ".default.txt")
-    if os.path.exists(path):
-        for line in open(path):
-            if line.strip() and not line.startswith("#"):
-                names.add(line.split()[0])
-    return names
+    """The test files that are not C89, and so run in the default mode
+    (needs_default), and skip/<suite>.default.txt's."""
+    rows = table(suite)
+    names = {name for name, row in rows.items() if needs_default(row)} if rows else set()
+    return names | listed_default(suite)
 
 
 def skipped(suite):
@@ -209,6 +251,8 @@ def cases(suite):
                 k += 1
                 if len(name) > 56:              # cc1 takes a unit name of up to 60
                     name = f"{name[:48]}_{k}"
+                if name + ".c" in skip:         # one instance of a template, by its name
+                    continue
                 src = os.path.join(GEN, name + ".c")
                 open(os.path.join(REPO, src), "w", encoding="latin-1", newline="\n").write(body)
                 found.append((f"s{k:04d}", src, None, f))

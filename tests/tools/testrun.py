@@ -134,6 +134,7 @@ def _session(programs, card_name, timeout, real_speed=False):
         shutil.rmtree(stage)
     os.makedirs(os.path.join(stage, "bin"))
     os.makedirs(os.path.join(stage, "out"))
+    os.makedirs(os.path.join(stage, "tmp"))     # as an install has it: tmpnam's and tmpfile's folder
     cmds = []
     for p in programs:
         folder = os.path.join(stage, "w", p.name)

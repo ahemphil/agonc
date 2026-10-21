@@ -8,7 +8,14 @@
  * the line editor are only called, not checked.
  */
 
+#include <stddef.h>
 #include <string.h>
+#include <agon/mos.h>
+#include <agon/vdp.h>
+#include <agon/gpio.h>
+#include <agon/joystick.h>
+#include <agon/keyboard.h>
+#include <agon/timer.h>
 #include "check.h"
 
 char buf[300];
@@ -63,7 +70,6 @@ FILINFO info;
 
 void test_fatfs(void)
 {
-    unsigned int n;
     int found;
     int count;
 
@@ -72,34 +78,31 @@ void test_fatfs(void)
     check((int)sizeof(DIR), 49);
 
     check(ffs_fopen(&fil, "existing.txt", FA_READ), FR_OK);
-    check(ffs_fread(&fil, buf, 5, &n), FR_OK);
-    check((int)n, 5);
+    check((int)ffs_fread(&fil, buf, 5), 5);    /* AgonDev's form: the count */
     check_mem(buf, "Hello", 5);
     check(ffs_feof(&fil), 0);
     check(ffs_flseek(&fil, 7L), FR_OK);
-    check(ffs_fread(&fil, buf, 5, &n), FR_OK);
+    check((int)ffs_fread(&fil, buf, 5), 5);
     check_mem(buf, "Agon!", 5);
-    check(ffs_fread(&fil, buf, 50, &n), FR_OK);
-    check((int)n, 1);                   /* the newline, and then the end */
+    check((int)ffs_fread(&fil, buf, 50), 1);   /* the newline, and then the end */
     check(ffs_feof(&fil), 1);
     check(ffs_fclose(&fil), FR_OK);
 
     check(ffs_fopen(&fil, "ffs.txt", FA_WRITE | FA_CREATE_ALWAYS), FR_OK);
-    check(ffs_fwrite(&fil, "123456", 6, &n), FR_OK);
-    check((int)n, 6);
+    check((int)ffs_fwrite(&fil, "123456", 6), 6);
     check(ffs_flseek(&fil, 3L), FR_OK);
     check(ffs_ftruncate(&fil), FR_OK);
     check(ffs_fclose(&fil), FR_OK);
     check((int)mos_fsize("ffs.txt"), 3);
     check(ffs_fopen(&fil, "missing.txt", FA_READ), FR_NO_FILE);
 
-    check(ffs_stat("existing.txt", &info), FR_OK);
+    check(ffs_stat(&info, "existing.txt"), FR_OK);
     check((int)info.fsize, 13);
     check(info.fattrib & AM_DIR, 0);
     check_str(info.fname, "existing.txt");
-    check(ffs_stat("sub", &info), FR_OK);
+    check(ffs_stat(&info, "sub"), FR_OK);
     check((info.fattrib & AM_DIR) != 0, 1);
-    check(ffs_stat("missing.txt", &info), FR_NO_FILE);
+    check(ffs_stat(&info, "missing.txt"), FR_NO_FILE);
 
     check(ffs_dopen(&dir, "/"), FR_OK);
     found = 0;
@@ -151,11 +154,121 @@ void test_uart_i2c(void)
     mos_i2c_close();
 }
 
+/* AgonDev's names (v0.22): the sysvar_ offsets against both structures,
+ * sys_vars, the mouse readers, waitvblank, mos_ugetc_nb, mos_oscli's three
+ * arguments, FRESULT. (mos_puts and the other output calls are t_vdu's.) */
+void test_agondev(void)
+{
+    volatile struct mos_sysvar *v;
+    unsigned long t;
+    FRESULT fr;
+    int r;
+
+    check((int)offsetof(struct mos_sysvar, cursor_x), sysvar_cursorX);
+    check((int)offsetof(struct mos_sysvar, scr_width), sysvar_scrWidth);
+    check((int)offsetof(struct mos_sysvar, scrpixel_index), sysvar_scrpixelIndex);
+    check((int)offsetof(struct mos_sysvar, rtc), sysvar_rtc);
+    check((int)offsetof(struct mos_sysvar, keydelay), sysvar_keydelay);
+    check((int)offsetof(struct mos_sysvar, scr_mode), sysvar_scrMode);
+    check((int)offsetof(struct mos_sysvar, mouse_x), sysvar_mouseX);
+    check((int)offsetof(struct mos_sysvar, mouse_ydelta), sysvar_mouseYDelta);
+    check((int)offsetof(struct mos_sysvar, gp), sysvar_gp);
+    check((int)offsetof(SYSVAR, vdp_pflags), sysvar_vdp_pflags);
+    check((int)offsetof(SYSVAR, scrpixel), sysvar_scrpixel);
+    check((int)offsetof(SYSVAR, audioSuccess), syscar_audioSuccess);
+    check((int)offsetof(SYSVAR, scrHeight), sysvar_scrHeight);
+    check((int)offsetof(SYSVAR, vkeycount), sysvar_vkeycount);
+    check((int)offsetof(SYSVAR, rtc), sysvar_rtc);
+    check((int)offsetof(SYSVAR, keyled), sysvar_keyled);
+    check((int)offsetof(SYSVAR, rtcEnable), sysvar_rtcEnable);
+    check((int)offsetof(SYSVAR, mouseWheel), sysvar_mouseWheel);
+    check((int)offsetof(SYSVAR, mouseYDelta), sysvar_mouseYDelta);
+    check((int)sizeof(SYSVAR), 0x33);
+    check((int)sizeof(SYSVAR_RTCDATA), 6);
+    check(vdp_pflag_mode, VDP_PFLAG_MODE);
+    check(FA_OPEN_EXISTING, 0);
+
+    v = MOS_SYSVAR;
+    check(sys_vars->scrCols, v->scr_cols);
+    check((int)sys_vars->scrWidth, (int)v->scr_width);
+    check(mos_sysvars()[sysvar_scrRows], v->scr_rows);
+    check((int)getsysvar_mouseX(), (int)v->mouse_x);
+    check(getsysvar_mouseButtons(), v->mouse_buttons);
+    check(getsysvar_mouseWheel(), v->mouse_wheel);
+    check(getsysvar_mouseXDelta(), v->mouse_xdelta);
+
+    t = getsysvar_time();
+    waitvblank();
+    check(getsysvar_time() != t, 1);
+
+    r = mos_ugetc_nb();
+    check(r >= -1 && r <= 255, 1);
+    check(mos_oscli("cd /", NULL, 0), 0);
+    fr = ffs_stat(&info, "existing.txt");
+    check(fr, FR_OK);
+}
+
+/* AgonDev's hardware headers: the ports read directly, the pins of port C
+ * (the user port; port B carries the VDP's interrupt and port D UART0, so
+ * neither is written), the joysticks, the delay against MOS's clock, and
+ * the key-event queue set up, polled empty and taken down. */
+void test_agondev_hw(void)
+{
+    struct keyboard_event_t e;
+    unsigned long t;
+    unsigned int b;
+    int ddr;
+
+    check(io_in(PC_DR) >= 0 && io_in(PC_DR) <= 255, 1);
+    check(inputPort(PORTC), io_in(PC_DR));
+    check(input(PORTC, 3), (io_in(PC_DR) & 8) != 0);
+    check(inputPinID(PC3), input(PORTC, 3));
+    check(input(PORTC, 8), 0);
+    check(PB0, 0x9A01);
+    check(PD7, 0xA280);
+
+    ddr = io_in(PC_DDR);
+    outputMode(PORTC, 0);
+    check(io_in(PC_DDR) & 1, 0);
+    inputModePinID(PC0);
+    check(io_in(PC_DDR) & 1, 1);
+    outputModePinID(PC0);
+    check(io_in(PC_DDR) & 1, 0);
+    inputMode(PORTC, 0);
+    check(io_in(PC_DDR) & 1, 1);
+    io_out(PC_DDR, ddr);
+    check(io_in(PC_DDR), ddr);
+
+    b = getJoystickButtons();
+    check(b <= 0xFFFF, 1);
+    check(joystick1_UP(b), !(b & 2));
+    check(joystick2_BUTTON2(b), !(b & 0x4000));
+
+    /* (the emulator runs unthrottled here, timer 0 at the emulated clock
+     * and MOS's at the host's, so only that it ends is checked; at real
+     * speed delay(100) took 12 centiseconds) */
+    t = getsysvar_time();
+    delay(50);
+    check(getsysvar_time() - t < 100, 1);
+    delay(0);
+
+    kbuf_init(0);
+    check(kbuf_poll_event(&e), 0);
+    kbuf_init(8);
+    check(kbuf_poll_event(&e), 0);
+    kbuf_clear();
+    check(kbuf_poll_event(&e), 0);
+    kbuf_deinit();
+    check(kbuf_poll_event(&e), 0);
+}
+
 int main(void)
 {
     test_mos_files();
     test_fatfs();
     test_sysvars();
     test_uart_i2c();
+    test_agondev();
+    test_agondev_hw();
     return finish();
 }

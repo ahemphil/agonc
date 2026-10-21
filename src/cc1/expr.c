@@ -579,6 +579,96 @@ static int fold_float(int op, int t, int a, int b)
     return num(c, T_INT);
 }
 
+/* Does 64-bit r hold a signed value of `bits` bits (24 or 32)? */
+static int fits_signed(struct i64 *r, int bits)
+{
+    unsigned long top;
+
+    top = bits == 24 ? 0x7FFFFFUL : 0x7FFFFFFFUL;
+    return (r->hi == 0 && r->lo <= top) || (r->hi == 0xFFFFFFFFUL && r->lo >= (0xFFFFFFFFUL ^ top));
+}
+
+/* the sign bit of a long long, and its most negative value */
+#define Q_NEG(q) (((q)->hi & 0x80000000UL) != 0)
+#define Q_MIN(q) ((q)->hi == 0x80000000UL && (q)->lo == 0)
+#define Q_M1(q) ((q)->hi == 0xFFFFFFFFUL && (q)->lo == 0xFFFFFFFFUL)
+
+/* Warn when signed constants a op b overflow their type t: + - * and
+ * the most negative value / -1. C89 3.4 requires a diagnostic where a
+ * constant expression is needed, and anywhere else the overflow is
+ * undefined; the folded value is the wrapped one, as the code would give.
+ * An int's or a long's true result is worked out in 64 bits; a long
+ * long's is judged by the signs, and a product by dividing it back. */
+static void check_overflow(int op, int t, int a, int b)
+{
+    struct i64 x;
+    struct i64 y;
+    struct i64 r;
+    struct i64 q;
+    struct i64 m;
+    int over;
+
+    if (op != B_ADD && op != B_SUB && op != B_MUL && op != B_DIVS)
+        return;
+    qval(a, &x);
+    qval(b, &y);
+    if (op == B_DIVS && i64_is_zero(&y))
+        return;                         /* fold reports it */
+    over = 0;
+    if (!is_llong(t)) {
+        if (op == B_ADD)
+            i64_add(&r, &x, &y);
+        else if (op == B_SUB)
+            i64_sub(&r, &x, &y);
+        else if (op == B_MUL)
+            i64_mul(&r, &x, &y);
+        else
+            i64_divs(&r, &m, &x, &y);
+        over = !fits_signed(&r, is_long(t) ? 32 : 24);
+    } else if (op == B_ADD) {
+        i64_add(&r, &x, &y);
+        over = Q_NEG(&x) == Q_NEG(&y) && Q_NEG(&r) != Q_NEG(&x);
+    } else if (op == B_SUB) {
+        i64_sub(&r, &x, &y);
+        over = Q_NEG(&x) != Q_NEG(&y) && Q_NEG(&r) != Q_NEG(&x);
+    } else if (op == B_DIVS) {
+        over = Q_MIN(&x) && Q_M1(&y);
+    } else if (!i64_is_zero(&x) && !i64_is_zero(&y)) {
+        if ((Q_MIN(&x) && Q_M1(&y)) || (Q_MIN(&y) && Q_M1(&x))) {
+            over = 1;
+        } else {
+            i64_mul(&r, &x, &y);
+            i64_divs(&q, &m, &r, &y);
+            over = q.hi != x.hi || q.lo != x.lo;
+        }
+    }
+    if (over)
+        warning("integer overflow in a constant expression");
+}
+
+/* Warn when -n, n a constant of signed integer type t, overflows: n is
+ * t's most negative value. (A function of its own, with plain compares:
+ * AgDev 3.1.0's clang failed on the test written inline in unary,
+ * "unable to legalize instruction".) */
+static void check_neg_overflow(int n, int t)
+{
+    struct i64 q;
+    unsigned long lo;
+
+    if (is_unsigned(t) || !is_integer(t))
+        return;
+    qval(n, &q);
+    if (is_llong(t)) {
+        if (q.hi != 0x80000000UL || q.lo != 0)
+            return;
+    } else {
+        lo = is_long(t) ? 0x80000000UL : 0xFF800000UL;
+        if (q.hi != 0xFFFFFFFFUL || q.lo != lo)
+            return;
+    }
+    warning("integer overflow in a constant expression");
+}
+
 /* ---- node builders ------------------------------------------------------------- */
 
 /* a op b; both operands already have the operation's type (a shift's
@@ -593,6 +683,8 @@ static int bin(int op, int t, int a, int b)
     if (is_const(a) && is_const(b)) {
         if (is_floating(value_type(a)))
             return fold_float(op, t, a, b);
+        if (!is_unsigned(value_type(a)))
+            check_overflow(op, value_type(a), a, b);
         if (is_llong(value_type(a)))
             return fold64(op, t, a, b);
         if (!is_long(value_type(a)))
@@ -1466,10 +1558,48 @@ static int mk_inc(int n, int kind)
     return node(EN_INC, nodes[n].type, n, -1, kind);
 }
 
+/* Bit-field member m (of type mt, qualified) of the struct at address p:
+ * an EN_BITF node. The field's bytes are one, or (a field wider than 8
+ * bits, which starts a byte) three, read and written whole; for a field of
+ * 9 to 16 bits the third byte is beyond the field (the next member, or
+ * past the struct) and is written back as read. The node's type is int,
+ * as a bit-field's value promotes to int, unless a 24-bit unsigned field
+ * needs unsigned int to hold it; a _Bool field's is _Bool, which tells a
+ * store to convert to 0 or 1. */
+static int bitf_node(int p, int m, int mt)
+{
+    p = node(EN_BIN, ptr_to(T_UCHAR), node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0), num(members[m].offset, T_INT), B_ADD);
+    if (members[m].width > 8)
+        p = node(EN_CAST, ptr_to(T_UINT), p, -1, 0);
+    p = node(EN_BITF, types[mt].kind == TY_BOOL ? T_BOOL : members[m].width < 24 || !is_unsigned(mt) ? T_INT : T_UINT,
+             p, -1, members[m].bit);
+    nodes[p].c = members[m].width;
+    nodes[p].hi8 = !is_unsigned(mt);
+    return p;
+}
+
+/* A local aggregate's bit-field initialiser that is not a constant (C99,
+ * stmt.c's bf_init defers it): bit-field member m of the struct at byte
+ * off of object lv set to expression v, as `=` would set it. */
+int bitfield_init_store(int lv, int off, int m, int v)
+{
+    int p;
+
+    p = node(EN_ADDR, ptr_to(nodes[lv].type), lv, -1, 0);
+    p = node(EN_BIN, ptr_to(T_UCHAR), node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0), num(off, T_INT), B_ADD);
+    p = bitf_node(p, m, members[m].type);
+    if (nodes[p].type == T_BOOL)
+        return bf_store(p, convert(v, T_BOOL, "initialiser"));
+    if (is_floating(value_type(v)))
+        v = conv(v, is_unsigned(nodes[p].type) ? T_UINT : T_INT);
+    need_integer(v, "a bit-field's initialiser");
+    return bf_store(p, conv(v, is_long(value_type(v)) || is_llong(value_type(v)) ? T_UINT : value_type(v)));
+}
+
 /* s.m or p->m: a DEREF of the member's type at the struct's address plus
  * the member's offset. The member's type takes on the struct's
  * qualifiers (a member of a const struct is const). A bit-field gives an
- * EN_BITF node instead. */
+ * EN_BITF node instead (bitf_node). */
 static int member(int n, int arrow)
 {
     int t;
@@ -1516,23 +1646,8 @@ static int member(int n, int arrow)
     next();
     mt = qualify(members[m].type, types[t].qual);
     off = members[m].offset;
-    if (members[m].width > 0) {
-        /* the field's bytes: one, or (a field wider than 8 bits, which
-         * starts a byte) three, read and written whole; for a field of 9
-         * to 16 bits the third byte is beyond the field (the next member,
-         * or past the struct) and is written back as read. The node's
-         * type is int, as a bit-field's value promotes to int, unless a
-         * 24-bit unsigned field needs unsigned int to hold it; a _Bool
-         * field's is _Bool, which tells a store to convert to 0 or 1. */
-        p = node(EN_BIN, ptr_to(T_UCHAR), node(EN_CAST, ptr_to(T_UCHAR), p, -1, 0), num(off, T_INT), B_ADD);
-        if (members[m].width > 8)
-            p = node(EN_CAST, ptr_to(T_UINT), p, -1, 0);
-        p = node(EN_BITF, types[mt].kind == TY_BOOL ? T_BOOL : members[m].width < 24 || !is_unsigned(mt) ? T_INT : T_UINT,
-                 p, -1, members[m].bit);
-        nodes[p].c = members[m].width;
-        nodes[p].hi8 = !is_unsigned(mt);
-        return p;
-    }
+    if (members[m].width > 0)
+        return bitf_node(p, m, mt);
     if (is_const(p))
         p = num(nodes[p].val + off, ptr_to(mt));        /* ((T *)0)->m: offsetof */
     else if (off != 0)
@@ -1686,7 +1801,14 @@ static int unary(void)
     if (accept(TK_P + '+')) {
         n = cast_expr();
         need_arith(n, "unary '+'");
-        return conv(n, promote(value_type(n)));
+        t = promote(value_type(n));
+        n = conv(n, t);
+        /* conv leaves a char or a short as it is (it is already widened in
+         * HL), but the result's type is the promoted one: sizeof (+c) is
+         * sizeof (int) */
+        if (value_type(n) != t)
+            n = node(EN_CAST, t, n, -1, 0);
+        return n;
     }
     if (accept(TK_P + '-')) {
         n = cast_expr();
@@ -1702,6 +1824,8 @@ static int unary(void)
                 fbits[n].hi = fbits[n].hi ^ 0x80000000UL;
             return n;
         }
+        if (is_const(n))
+            check_neg_overflow(n, t);
         if (is_const(n) && is_llong(t)) {
             qval(n, &q);
             i64_neg(&q, &q);
@@ -2135,6 +2259,31 @@ int case_test64(int tmp, int t, struct i64 *v)
     n = conv(n, t);
     qval(n, v);
     return bin(B_EQ, T_INT, node(EN_LVAR, t, -1, -1, tmp), n);
+}
+
+/* const_expr for an enumerator, whose value must be one an int can hold
+ * (C89 3.5.2.2, a constraint): a constant of a wider or an unsigned type
+ * may not be, so its whole value (qval) is checked */
+int enum_const_expr(void)
+{
+    int n;
+    int mark;
+    int v;
+    struct i64 q;
+
+    mark = nnodes;
+    n = conditional();
+    if (!is_const(n) || !is_integer(nodes[n].type)) {
+        error("not an integer constant expression");
+        v = 0;
+    } else {
+        qval(n, &q);
+        if (!(q.hi == 0 && q.lo <= 0x7FFFFFUL) && !(q.hi == 0xFFFFFFFFUL && q.lo >= 0xFF800000UL))
+            error("an enumerator's value does not fit in int (-8388608 to 8388607)");
+        v = nodes[n].val;
+    }
+    nnodes = mark;
+    return v;
 }
 
 /* the value's low 24 bits as an int: array sizes, bit-field widths,

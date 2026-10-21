@@ -95,9 +95,10 @@ with its output, which the driver lets through unfiltered.
 | `-L dir` | add a library directory (repeatable) |
 | `-lname` | link `libname.s` found on the library path |
 | `-D name[=val]`, `-U name` | define or undefine a macro for `cpp` |
-| `-O`, `-O1`..`-O3`, `-Os` | optimise: `cc2`'s peephole pass and its faster code for signed comparisons (§8). On by default; `-O0` turns it off (the last one counts) |
+| `-O`, `-O1`..`-O3`, `-Os` | optimise: `cc2`'s peephole pass, and its faster code for signed comparisons and for constant operands (§8). On by default; `-O0` turns it off (the last one counts) |
 | `-w`, `-Wall`, `-Werror` | suppress warnings; all warnings (default); warnings are errors |
 | `--index lib.s...` | have `ld` write each library's index, `lib.idx`, which makes links that use it faster (object_format.md §9); nothing else is done |
+| `--lib` | with `-o libname.s`: compile the `.c` and `.i` inputs, join their `.s` files and any `.s` inputs, in order, into `libname.s`, and index it (`libname.idx`): a library in one command |
 | `-std=c89`, `-std=c90`, `-ansi` | strict mode (c89_spec.md §1), passed to `cpp` and `cc1` as `-ansi` |
 | `-std=c99`, `-std=gnu99` | the default mode: undoes an earlier `-ansi` (the last of these options wins, as in gcc) |
 | `-nostdlib` | do not add `crt0.s`, `rt.s`, `libc.s`, `libm.s`, `libagon.s` |
@@ -109,11 +110,23 @@ with its output, which the driver lets through unfiltered.
 | `--version` | print the compiler version and target language version |
 | `-h`, `--help` | list the options |
 | `--` | end of options |
-| `@file` | read more arguments from `file`, one per whitespace-separated token (the bootstrap's response files) |
+| `@file` | read more arguments from `file`, one per whitespace-separated token, of any length (the bootstrap's response files); wildcards in it are expanded too |
+| `--big-tables` | on a PC only: the driver's tables (§5) eight times as large as the Agon's |
 
 Unknown options are errors, as are gcc options that imply things this
 platform cannot do (`-shared`, `-static`, `-g`, `-x`, `-M*`), each with a
 one-line explanation. Options and inputs may be mixed in any order.
+
+**Wildcards.** MOS passes `*` and `?` to a program as they are, so the
+driver expands them itself: a word that is not an option and has `*`
+(any run of characters) or `?` (any one) in its file name becomes the
+names of the files in that folder that match, letters in either case, in
+alphabetical order whatever order the folder keeps them in, so that a
+build is the same on every card. `*` does not match a name starting with
+a dot unless the pattern does. A pattern that matches nothing is an
+error, as is one with a wildcard in its folder part (`src/*/a.c`). On a
+PC whose shell has expanded the pattern already, the driver gets plain
+names and expands nothing.
 
 **`-o` never overwrites a source.** Before anything runs, the driver
 refuses an `-o` that names one of the inputs (letters in either case, `/`
@@ -135,7 +148,7 @@ mode (c89_spec.md §13, item 9).
 | Directory | Contents |
 |---|---|
 | `/lib/agonc` | `stdio.h`, `string.h`, …, `libc.s`, `libm.s`, `libagon.s`, `crt0.s`, `rt.s`, and their indexes |
-| `/lib/agonc/agon` | `mos.h`, `uart.h`, `vdp.h`, included as `<agon/vdp.h>`; their functions are in `libc.s` (what the C library itself uses) and `libagon.s` |
+| `/lib/agonc/agon` | `mos.h`, `uart.h`, `vdp.h`, `keyboard.h`, `gpio.h`, `joystick.h`, `timer.h` (and `vdp_vdu.h`, a forward), included as `<agon/vdp.h>`; their functions are in `libc.s` (what the C library itself uses) and `libagon.s` |
 | `/usrlib` | user libraries: `foo.h` and `libfoo.s`, or a sub-folder per library |
 
 `#include <name>`: `-I` directories, then `/usrlib`, then `/lib/agonc`.
@@ -155,8 +168,8 @@ only such values are in hand-written assembly.
 
 A third part, `libagon.s`, holds the Agon interface beyond what the C
 library itself uses: the rest of the MOS API, the FatFS calls, the
-serial port and the VDU commands (`<agon/mos.h>`, `<agon/uart.h>`,
-`<agon/vdp.h>`). The driver always passes it last, as `--if-needed
+serial port, the VDU commands and the eZ80's own hardware (`<agon/mos.h>`, `<agon/uart.h>`,
+`<agon/vdp.h>` and the others). The driver always passes it last, as `--if-needed
 /lib/agonc/libagon.s`: `ld` reads it (through its index) only when the rest of
 the program leaves a function undefined, so a program that uses none
 of it links as fast as before (object_format.md §9).
@@ -171,7 +184,24 @@ MOS rejects a command line over 246 characters and reads script lines into
 passing file names only; include directories, macro definitions and
 library lists that would not fit are written to `/tmp/agonc/<pass>.rsp`
 and passed as `@/tmp/agonc/<pass>.rsp`, so **every pass accepts `@file`**, as the
-driver does.
+driver does. A long command goes in a response file of the user's own
+(`agonc @game.rsp`), which may be of any length; wildcards keep it short.
+
+**The driver's tables** are fixed, as the moslet's 32 KB requires: 96
+arguments in 2,048 characters (after `@file` and wildcard expansion), 32
+inputs, 48 `-I`/`-D`/`-U`/`-L`/`-l`/`-Wl,` options, 1,200 characters in a
+pass's argument string, and 84 temporary files in 2,000 characters of
+names. A build needs one temporary name for each input (its `.s`, for the
+link: the `.i` and `.ir` are removed as soon as `cc2` has run), so 32
+inputs fit; `-save-temps` keeps all three, about 25 inputs' worth.
+`ld` takes 48 files, so 32 inputs and the library's five always fit.
+
+**A PC has the same limits**, so that a build that works on a PC works on
+the Agon: a path under `$AGONC_ROOT` counts as long as the Agon's path
+without it would be, and the PC's arrays are larger only to hold the
+longer paths. `--big-tables` (on a PC only; an error on the Agon) raises
+every one of the driver's limits eight times, for builds that are meant
+for the PC alone. The passes' own tables are the same on both machines.
 
 ## 6. Exit status
 
@@ -195,6 +225,8 @@ agonc -c util.c                        -> util.s
 agonc -E -o main.i main.c
 agonc -S main.c                        -> main.s
 agonc -v -o t.bin t.c -Wl,--entry=_irq_handler
+agonc --lib -o libutil.s src/util/*.c  -> libutil.s and libutil.idx
+agonc -o game.bin src/*.c -L. -lutil
 ```
 
 ## 8. Implementation notes
@@ -230,6 +262,12 @@ leave open.
   inputs with the same file name, compared without case as FAT does, are
   an error: they would share temporary files and a unit id. `-o` with `-E`,
   `-c` or `-S` needs a single compiled input.
+- **`--lib`** compiles as for a link, then joins the `.s` files (the
+  compiled inputs' and the `.s` inputs', in command-line order, which for
+  a wildcard is alphabetical) into `-o`'s file, a block at a time, and
+  runs `ld --index` on it. It needs `-o` ending in `.s`, does not go with
+  `-E`, `-c` or `-S`, and takes no `.asm` input. One `.c` input gives the
+  same `.s` as `-c` does.
 - **Messages** are `agonc: error: ...` and `agonc: warning: ...`; `-v`
   prints each command as it runs it.
 - **`-O`**: `cc2`'s peephole pass. After a
@@ -238,7 +276,16 @@ leave open.
   `ex de,hl`, small constants become `inc`/`dec` and byte stores, and
   signed comparisons are made inline instead of through the helpers. A
   rule that needs a register to be unused afterwards checks the code that
-  follows and gives up at anything it cannot follow. With `-O0` the
+  follows and gives up at anything it cannot follow. And an `int` or
+  `long` operation with a constant operand is made inline as well: a
+  shift by a constant count; `&`, `|` and `^` with a constant (a byte at
+  a time, 0x00 and 0xFF bytes costing nothing); `/` and `%` by a power of
+  two (signed ones rounding toward zero, as `/` does: a negative dividend
+  is biased by 2^k - 1 first); an `unsigned char` `/` or `%` any other
+  constant, by the eZ80's 8-bit multiply (`x * M >> s`, with `M` and `s`
+  checked against every byte value); the same in compound assignments; `x & k`
+  as a condition, tested in `A`; and a `long` tested against 0 or
+  compared with a constant a byte at a time. With `-O0` the
   peephole pass is off. The compiler and its library are built with `-O`
   (the bootstrap's response files and scripts). It is the driver's
   default; `cc2` run on its own needs `-O`.

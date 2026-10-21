@@ -8,28 +8,30 @@ peak over the compiler's own sources and the C library, against its limit
 |---|---:|---:|---:|---|
 | cc1 cases | 24 | 300 | 8% | cc1: lex.c |
 | cc1 function strings | 244 | 400 | 61% | cpp: cpp.c |
-| cc1 globals | 462 | 1200 | 38% | cc1: stmt.c |
+| cc1 globals | 512 | 2000 | 25% | libc: vdpbmp.c |
 | cc1 goto labels | 0 | 100 | 0% | cpp: cpp.c |
 | cc1 locals | 38 | 300 | 12% | libc: math.c |
-| cc1 members | 103 | 800 | 12% | libc: stdio.c |
-| cc1 name text | 8039 | 20000 | 40% | libc: vdpaudio.c |
-| cc1 names | 709 | 2000 | 35% | cc1: stmt.c |
+| cc1 members | 141 | 800 | 17% | libc: stdio.c |
+| cc1 name text | 10968 | 32000 | 34% | libc: vdpbmp.c |
+| cc1 names | 838 | 3000 | 27% | libc: vdpbmp.c |
 | cc1 nodes | 117 | 500 | 23% | cc1: stmt.c |
 | cc1 parameter types | 369 | 1500 | 24% | cc1: stmt.c |
 | cc1 switches | 3 | 100 | 3% | libc: math.c |
-| cc1 tags | 15 | 150 | 10% | cc1: emit.c |
-| cc1 types | 305 | 800 | 38% | cc1: stmt.c |
-| cc2 instructions | 2656 | 4000 | 66% | libc: math99.c |
+| cc1 tags | 16 | 150 | 10% | libc: stdio.c |
+| cc1 types | 308 | 800 | 38% | cc1: stmt.c |
+| cc2 instructions | 2679 | 4000 | 66% | libc: math99.c |
 | cc2 nodes | 100 | 500 | 20% | cc1: expr.c |
 | cc2 text | 16115 | 28000 | 57% | cc2: cc2.c |
-| cpp macro text | 4763 | 32000 | 14% | cc1: stmt.c |
-| cpp macros | 295 | 1200 | 24% | cc1: stmt.c |
+| cpp macro text | 6813 | 32000 | 21% | libc: vdpbmp.c |
+| cpp macros | 319 | 1200 | 26% | libc: hw.c |
+| ld directory | 0 | 4000 | 0% | cpp: link |
 | ld implicit calls | 0 | 400 | 0% | cpp: link |
-| ld name bytes | 12386 | 40000 | 30% | cc1: link |
-| ld references | 3162 | 8000 | 39% | cc1: link |
-| ld sections | 882 | 1500 | 58% | cc1: link |
-| ld symbols | 917 | 3000 | 30% | cc1: link |
-| ld units | 22 | 64 | 34% | cc1: link |
+| ld name bytes | 12660 | 40000 | 31% | cc1: link |
+| ld references | 3030 | 8000 | 37% | cc1: link |
+| ld sections | 897 | 1500 | 59% | cc1: link |
+| ld symbols | 932 | 3000 | 31% | cc1: link |
+| ld units | 22 | 128 | 17% | cc1: link |
+| ld wants | 0 | 1000 | 0% | cpp: link |
 
 (Per-function and per-initialiser tables are the largest single function's or
 initialiser's; the rest are per translation unit.)
@@ -40,8 +42,8 @@ build (64-bit pointers), so they overstate the device's.
 
 | Program | Image | bss | Free | Labels | Label memory | Fixup memory |
 |---|---:|---:|---:|---:|---:|---:|
-| cpp | 52670 | 200950 | 205132 | 498 | 22799 | 24672 |
-| cc1 | 151363 | 177765 | 129624 | 952 | 44565 | 39064 |
-| cc2 | 81700 | 129165 | 247887 | 454 | 21111 | 18504 |
-| ld | 33839 | 185811 | 239102 | 314 | 14336 | 14392 |
-| agonc | 18716 | 7915 | 6137 | 227 | 10365 | 6168 |
+| cpp | 52048 | 200950 | 205754 | 481 | 22073 | 22616 |
+| cc1 | 156713 | 235038 | 67001 | 964 | 45196 | 39064 |
+| cc2 | 92405 | 129165 | 237182 | 477 | 22332 | 18504 |
+| ld | 40738 | 231302 | 186712 | 355 | 16349 | 14392 |
+| agonc | 22775 | 7209 | 2784 | 252 | 11563 | 8224 |

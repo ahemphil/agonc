@@ -54,10 +54,10 @@ release it. Claude will take it from here.
 agonc is a C compiler that runs on the Agon Light and Agon Console8, the
 eZ80 computers, and compiles C programs into MOS programs on the Agon
 itself. No PC is needed to use it. It compiles C99, all but variable-length
-arrays and complex numbers, with its standard library, and strict ANSI C89
-with `-ansi`; and it compiles itself.
+arrays, complex numbers and the wide-character library, with its standard
+library, and strict ANSI C89 with `-ansi`; and it compiles itself.
 
-**This is a beta: version 1.1.0-beta.2.** It
+**This is a beta: version 1.1.0-beta.3.** It
 passes its own tests and three free C test suites, and it has run on real
 hardware, but few people have used it yet. Reports of anything that goes
 wrong are very welcome ([Contributing](#contributing)).
@@ -70,13 +70,14 @@ agonc -o game.bin main.c gfx.c   several files
 
 ## What it has
 
-- **C99** but for variable-length arrays and complex numbers, as C11 left
-  it mandatory: `long long`, `_Bool`, `inline`, `//` comments,
+- **C99** but for variable-length arrays and complex numbers (which C11
+  made optional) and the wide-character library (`<wchar.h>` and
+  `<wctype.h>`): `long long`, `_Bool`, `inline`, `//` comments,
   declarations anywhere, designated initialisers, compound literals,
   variadic macros and the rest. **C89, all of it**, in a strict mode
   (`-ansi`) that conforms.
 - **The standard library**, C99's included but for `<complex.h>`,
-  `<fenv.h>`, `<tgmath.h>` and the wide characters: files on the SD card,
+  `<fenv.h>`, `<tgmath.h>`, `<wchar.h>` and `<wctype.h>`: files on the SD card,
   `printf`, `snprintf` and `scanf` with floating point, `<math.h>` with
   C99's functions and their `float` forms, `<stdint.h>` and `<inttypes.h>`,
   `<time.h>` on the Agon's clock, `<signal.h>` with Ctrl-C, and the rest.
@@ -84,7 +85,9 @@ agonc -o game.bin main.c gfx.c   several files
   (the eZ80 has no floating-point hardware), and 64-bit `long long`.
 - **The Agon's own interface**: every MOS 2.3.3 call, the serial port, and
   every documented VDU command for the VDP's graphics, sprites, sound and
-  buffers, in `<agon/mos.h>`, `<agon/uart.h>` and `<agon/vdp.h>`.
+  buffers, in `<agon/mos.h>`, `<agon/uart.h>` and `<agon/vdp.h>`, with
+  AgonDev's names; and AgonDev's key queue, GPIO, joystick and delay
+  headers.
 - **gcc-style options** (`-o`, `-c`, `-I`, `-D`, `-l`, `-O0`, `-Werror`,
   ...), inline assembly, and a linker that keeps only the code a program
   uses.
@@ -95,7 +98,7 @@ emulator.
 
 ## Install
 
-Download `agonc-1.1.0-beta.2.zip` from the
+Download `agonc-1.1.0-beta.3.zip` from the
 [Releases page](https://github.com/ahemphil/agonc/releases) and unzip it
 onto the root of the Agon's SD card, merging its folders with the
 ones already there. It adds `/mos/agonc.bin`, `/bin/agonc/`, `/lib/agonc/`,
@@ -109,7 +112,7 @@ To build agonc from source instead, on an Agon or a PC, see
 
 - **[The manual](docs/manual/README.md)**: a quick start, the command and
   its options, the language, the compiler's messages, the C library, the
-  Agon library, porting from AgDev, and how agonc works. `make manual`
+  Agon library, porting from AgonDev and AgDev, and how agonc works. `make manual`
   turns it into a PDF for printing; the PDF is also attached to each
   release.
 - **[Examples](examples/README.md)**: short commented programs for files,
@@ -130,9 +133,10 @@ and the copy it builds of itself is identical, byte for byte, to the copy
 that built it, under MOS 2.3.3 and (on the emulator) MOS 3.0.2. Every
 usable C89 test of three free C test suites passes in strict mode:
 c-testsuite 137 of 137, GCC's torture tests 577 of 577, and SDCC's
-regression tests 644 of 644 files. agonc's own suites test each pass, the
-libraries clause by clause, the examples and the bootstrap, on the emulator
-(`make check`).
+regression tests 644 of 644 files; of their later tests, the default mode
+passes 44 of 46, 581 of 669 and 627 of 637 files. agonc's own suites test
+each pass, the libraries clause by clause, the examples and the bootstrap,
+on the emulator (`make check`).
 
 ## Built with Claude
 

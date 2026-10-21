@@ -26,7 +26,7 @@ PASSES := cpp cc1 cc2 ld
 PROGS := $(PASSES) agonc
 LIBC_S := $(foreach u,ctype malloc stdio stdlib string exit time mos,build/cross/$(u).s)
 LIBM_S := $(foreach u,fp math math99 mathf ll,build/cross/$(u).s)
-LIBAGON_UNITS := uart vdp mosapi sysvar vdpsys vdpbmp vdpaudio vdpbuf vdpmore handler
+LIBAGON_UNITS := uart vdp mosapi sysvar vdpsys vdpbmp vdpaudio vdpbuf vdpmore handler hw
 LIBAGON_S := $(foreach u,$(LIBAGON_UNITS),build/cross/$(u).s) lib/agon/kbint.s
 
 HOST_CFLAGS := -std=c89 -pedantic -Wall -Wextra -Werror -Wdeclaration-after-statement -Wshadow \
@@ -180,6 +180,7 @@ cross: host
 	$(DRIVER) -O -Werror -c -o build/cross/vdpbuf.s lib/agon/vdpbuf.c
 	$(DRIVER) -O -Werror -c -o build/cross/vdpmore.s lib/agon/vdpmore.c
 	$(DRIVER) -O -Werror -c -o build/cross/handler.s lib/agon/handler.c
+	$(DRIVER) -O -Werror -c -o build/cross/hw.s lib/agon/hw.c
 	$(call CAT,$(LIBC_S),$(AGON)/lib/agonc/libc.s)
 	$(call CAT,$(LIBM_S),$(AGON)/lib/agonc/libm.s)
 	$(call CAT,$(LIBAGON_S),$(AGON)/lib/agonc/libagon.s)

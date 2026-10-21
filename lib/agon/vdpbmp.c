@@ -15,6 +15,8 @@
 
 #include <agon/vdp.h>
 #include <agon/mos.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* A 16-bit value, low byte first (as in vdp.c). */
 #define W(b, i, v) ((b)[i] = (char)((v) & 255), (b)[(i) + 1] = (char)((v) >> 8 & 255))
@@ -101,13 +103,17 @@ int vdp_load_bitmap_file(const char *filename, int width, int height)
     return n > 0 ? -1 : 0;
 }
 
-/* The screen between the last two graphics points into bitmap n (VDP
- * 2.2.0: VDU 23, 27, 1, n, 0, 0;): seven bytes, the last two a 16-bit
- * zero. The command number is the pixel load's; these arguments make it
- * a capture. */
-void vdp_capture_bitmap(int n)
+/* The screen from left, top to right, bottom into bitmap n (VDP 2.2.0),
+ * AgonDev's form: the two corners as moves, then VDU 23, 27, 1, n, 0, 0;,
+ * seven bytes, the last two a 16-bit zero. The command number is the
+ * pixel load's; these arguments make it a capture. (AgonDev v0.22's own
+ * sends something else, by a slip: the function's name for its command's.) */
+void vdp_capture_bitmap(int top, int left, int bottom, int right, int n)
 {
     char x[7];
+
+    vdp_move_to(left, top);
+    vdp_move_to(right, bottom);
 
     x[0] = 23;
     x[1] = 27;
@@ -313,4 +319,82 @@ void vdp_adv_create_sprite(int sprite, int first, int frames)
 void vdp_mouse_cursor_from_bitmap(int hot_x, int hot_y)
 {
     bmp(0x40, 2, hot_x, hot_y);
+}
+
+/* ---- AgonDev's names (v0.22) --------------------------------------------------------- */
+
+static void vdu3(int a, int b, int c)
+{
+    char x[3];
+
+    x[0] = a;
+    x[1] = b;
+    x[2] = c;
+    vdu_n(x, 3);
+}
+
+void vdp_set_hardware_sprite(void)
+{
+    vdu3(23, 27, 19);
+}
+
+void vdp_set_software_sprite(void)
+{
+    vdu3(23, 27, 20);
+}
+
+/* VDU 23, 27, &40, hotx, hoty: the current bitmap as the mouse cursor. */
+void vdp_mouse_set_bitmap(int hotx, int hoty)
+{
+    char x[5];
+
+    x[0] = 23;
+    x[1] = 27;
+    x[2] = 0x40;
+    x[3] = hotx;
+    x[4] = hoty;
+    vdu_n(x, 5);
+}
+
+/* Both loaders: each frame read whole from its file into one buffer, then
+ * selected (as a bitmap or a buffer) and loaded. Stops at the first frame
+ * that cannot be read; the buffer is freed either way. */
+static int load_frames(const char *prefix, const char *format, int width, int height, int num, int bitmap_num, int adv)
+{
+    static char name[32];
+    unsigned long *pixels;
+    FILE *f;
+    size_t got;
+    int i;
+
+    pixels = malloc((size_t)width * height * sizeof(unsigned long));
+    if (pixels == NULL)
+        return 0;
+    for (i = 0; i < num; i++) {
+        sprintf(name, format, prefix, i);
+        f = fopen(name, "rb");
+        if (f == NULL)
+            break;
+        got = fread(pixels, sizeof(unsigned long), (size_t)width * height, f);
+        fclose(f);
+        if (got != (size_t)width * height)
+            break;
+        if (adv)
+            vdp_adv_select_bitmap(bitmap_num + i);
+        else
+            vdp_select_bitmap(bitmap_num + i);
+        vdp_load_bitmap(width, height, pixels);
+    }
+    free(pixels);
+    return i;
+}
+
+int vdp_load_sprite_bitmaps(const char *prefix, const char *format, int width, int height, int num, int bitmap_num)
+{
+    return load_frames(prefix, format, width, height, num, bitmap_num, 0);
+}
+
+int vdp_adv_load_sprite_bitmaps(const char *prefix, const char *format, int width, int height, int num, int bitmap_num)
+{
+    return load_frames(prefix, format, width, height, num, bitmap_num, 1);
 }

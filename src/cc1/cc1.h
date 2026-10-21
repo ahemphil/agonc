@@ -39,13 +39,13 @@
 /* Running out of one is a fatal error naming the table, never a silent
  * truncation. MAX_IDENT is c89_spec.md 4's 47 significant characters. */
 #define MAX_IDENT 47
-#define NAME_TEXT 20000         /* interned identifier text */
-#define MAX_NAMES 2000
-#define NAME_HASH 4096
+#define NAME_TEXT 32000         /* interned identifier text */
+#define MAX_NAMES 3000
+#define NAME_HASH 8192
 #define MAX_STRLIT 600          /* one string literal's bytes (509 + slack) */
 #define MAX_TYPES 800
 #define MAX_PLIST 1500          /* parameter types, all function types together */
-#define MAX_GLOBALS 1200
+#define MAX_GLOBALS 2000
 #define MAX_LOCALS 300
 #define MAX_BLOCKS 200          /* blocks (compound statements) in one function */
 #define MAX_DEPTH 64            /* blocks nested in one function */
@@ -244,7 +244,8 @@ struct member {
 struct gsym {
     int name;
     int type;
-    int line;           /* where it was declared, for later diagnostics */
+    int line;           /* where it was declared, for later diagnostics: the line */
+    int file;           /* and the file, interned (a header's, for one declared there) */
     int val;            /* SK_ENUMC: the value */
     unsigned char kind;         /* SK_* */
     unsigned char sclass;       /* SC_STATIC: internal linkage */
@@ -361,6 +362,7 @@ extern int tok_wide;        /* TK_STR: a wide string, L"..." */
 extern int tok_line;        /* the current token's line: diagnostics report it */
 extern int prev_line;         /* the line of the previous token */
 extern char cur_file[128];  /* the source file name from cpp's latest line marker */
+extern int cur_file_name;    /* cur_file interned (a name), for a symbol to remember where it was declared */
 extern int errors;          /* errors so far: any makes cc1 fail and remove its output */
 extern int warnings_off;    /* -w */
 extern int werror;          /* -Werror: warnings are errors */
@@ -468,6 +470,8 @@ int num(int v, int t);
 int expression(void);
 int assign_expr(void);
 int const_expr(void);
+int enum_const_expr(void);
+int bitfield_init_store(int lv, int off, int m, int v);
 void const_expr32(struct i32 *r, int *type);
 int case_test64(int tmp, int t, struct i64 *v);   /* a case label: 32 bits and its type */
 int convert(int n, int t, char *what);

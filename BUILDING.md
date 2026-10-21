@@ -263,19 +263,19 @@ The finished compiler, from either path, should be exactly these files:
 
 | File | Size (bytes) | SHA-256 |
 |---|---:|---|
-| `/mos/agonc.bin` | 18,716 | `bb4ea0506433378e46ea59ee7ecc436988040b59af31afc453d106747bf84cdb` |
-| `/bin/agonc/cpp.bin` | 52,670 | `3313a9ed796ede02b3206adc4f4a1951263699f2d18033c1bdff0e9c5830909a` |
-| `/bin/agonc/cc1.bin` | 151,363 | `61bc8477f7f7da18605af4e48c174faacae8d10b75058890c5da98f0d019e8b7` |
-| `/bin/agonc/cc2.bin` | 81,700 | `2d4bcf9ee5cc386c5d52a1523b9a92d6b59e328da99d6ad8face9dee93d73e2c` |
-| `/bin/agonc/ld.bin` | 33,839 | `c54e98d0fb023aa2cba30582d3ef54e5605e891484ec68795fdc8a9aca2a370b` |
-| `/lib/agonc/libc.s` | 184,156 | `4a36745b881226ef51487b03dbb933cf9481d6f67e6e746f8990a5c8b914dbb0` |
-| `/lib/agonc/libm.s` | 715,413 | `8f3628b3a7d7ca6e5004c7500ccce54503dd5f01b1accceff6a2cbc1448c6948` |
-| `/lib/agonc/libagon.s` | 156,089 | `f1cd33da1abba1bcc134f56453a815c4b0488dc5b8358fae558f71fb9367b4d2` |
-| `/lib/agonc/crt0.idx` | 729 | `d564384a2a734244a672ddff20794d93e26b98cb391a9c6d46f363b2eef1dd68` |
-| `/lib/agonc/rt.idx` | 2,636 | `9ac6741ec40979e7f807c4555d1ad3cc734b50571dd9f516d029ff3be52c5888` |
-| `/lib/agonc/libc.idx` | 24,083 | `3f99b45cb0cbbde474c65c5ced180dfe5228c431c8a584051844303d8ba9c814` |
-| `/lib/agonc/libm.idx` | 83,389 | `25c85261f41d530dabe1bab46ce8e1823e7adb4f68233f5d03373d311fea8f30` |
-| `/lib/agonc/libagon.idx` | 33,090 | `44e84fdc9bee8953ea34da31fb7cc57cc3f4b10ef97c37eb81b6b33bc2302e16` |
+| `/mos/agonc.bin` | 22,775 | `f5c776305f3aa46d03ff99a0a11465993f1c80bea53c41774a8a73196c6cefbf` |
+| `/bin/agonc/cpp.bin` | 52,048 | `113d9dd19a563a2eddea3b0884d665b432eec600d0821fc8eb9ccfe846e9d207` |
+| `/bin/agonc/cc1.bin` | 156,713 | `886b667b2a39deea8d5761ac4c8dccb8b84c21a05e7c4dac71b67def7d4a90d1` |
+| `/bin/agonc/cc2.bin` | 92,405 | `59fea58d06519df0e1fb4022e99916d527ce0561b1799de5175cf7ea79b0fef0` |
+| `/bin/agonc/ld.bin` | 40,738 | `ccc4ea368bccc31bb078cdd114b7bd14234daa69d26224a651f49549e20a5d2a` |
+| `/lib/agonc/libc.s` | 182,275 | `4dc93817ea48231c49ae6665bf7ad464cb8e98bd1c94027a7b3ce8b29b78adae` |
+| `/lib/agonc/libm.s` | 738,501 | `54f911ad109bae63f8a00496fb8bc9a5eb83f4d9aa10fadde87e97758391825f` |
+| `/lib/agonc/libagon.s` | 195,735 | `f820cebb5c3c06d5f0b30f5453545abc4f2fba646e5c7c561e6226bc7a8fc815` |
+| `/lib/agonc/crt0.idx` | 901 | `05e16fb84aab395326cc33b05fc0abb619b1129229c98089a9b48b0a5996f6e9` |
+| `/lib/agonc/rt.idx` | 3,506 | `5dd66a107d4007e398922edca5bbc2ab720d9ef64248986172265ef61f902c4f` |
+| `/lib/agonc/libc.idx` | 28,090 | `e3db21d12c3680f24f7cdf173e3d9bcf96973690f4afdb76fa05ada407cba829` |
+| `/lib/agonc/libm.idx` | 91,558 | `0c1179c0c4ff8beae0e17032f76c816b39a7ced142ce828fa6542ff1deb94525` |
+| `/lib/agonc/libagon.idx` | 47,796 | `cf8217584959699f4d0d19f91c33b025f1412175ffa78dc30ecbfdc77dc9e6e1` |
 
 On a PC: `sha256sum` (Linux), `shasum -a 256` (macOS), or
 `Get-FileHash` (PowerShell). The bootstrap's last script already checks
@@ -308,7 +308,8 @@ hello
 lists them, `-time` shows how long each pass took, and [docs/driver.md](docs/driver.md)
 has the details. `-o` refuses a source file's name, so a slip such as
 `agonc -o hello.c hello.c` cannot overwrite your program. The language is
-C99 but for variable-length arrays and complex numbers; `-ansi` is strict C89
+C99 but for variable-length arrays, complex numbers and the wide-character
+library; `-ansi` is strict C89
 ([docs/c89_spec.md](docs/c89_spec.md) §1).
 
 ## 10. Troubleshooting

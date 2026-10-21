@@ -1,8 +1,9 @@
 # The agonc manual
 
 agonc is a C compiler that runs on the Agon Light and the Agon Console8. It
-compiles C99, all of it but variable-length arrays and complex numbers, into
-programs for MOS, on the Agon itself; `-ansi` gives strict C89.
+compiles C99, all of it but variable-length arrays, complex numbers and the
+wide-character library, into programs for MOS, on the Agon itself; `-ansi`
+gives strict C89.
 This manual is for programmers who know C and want to use it on the Agon.
 
 1. [Quick start](01-quick-start.md): install agonc, compile and run a
@@ -17,8 +18,8 @@ This manual is for programmers who know C and want to use it on the Agon.
    library, and how each behaves on the Agon.
 6. [The Agon library](06-agon-library.md): MOS, the serial port, and the
    VDP's graphics, sound and system commands.
-7. [Porting from AgDev](07-porting-from-agdev.md): moving a program from
-   the PC-hosted AgDev toolchain, and back to HI-TECH C and CP/M.
+7. [Porting from AgonDev and AgDev](07-porting-from-agdev.md): moving a
+   program from the PC-hosted toolchains, and back to HI-TECH C and CP/M.
 8. [How agonc works](08-how-agonc-works.md): the passes, the files between
    them, and where to read more.
 

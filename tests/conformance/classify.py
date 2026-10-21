@@ -9,7 +9,12 @@ For every test file it:
   3. scans the remaining code with regexes and a small brace/statement scanner,
 and writes one CSV row of flags per test plus a summary.
 
-usage: classify.py OUT_PREFIX SUITE_NAME ROOT_DIR GLOB [GLOB...] [--sdcc]
+usage: classify.py OUT_PREFIX SUITE_NAME ROOT_DIR GLOB [GLOB...] [--sdcc] [--c99]
+
+--c99 adds the macros agonc's default mode predefines (__STDC_VERSION__
+199901L and the rest, C99_PREDEF), so that the #if branches evaluated are
+the ones a test compiled in the default mode takes; fetch_suites.py writes
+that classification beside the C89 one, as <suite>_c99.csv.
 """
 import csv, glob, json, os, re, sys
 from collections import Counter, defaultdict
@@ -36,6 +41,10 @@ PREDEF = {
     "STACK_SIZE": "16384", "SIGNAL_SUPPRESS": "1",
 }
 SDCC_PREDEF = {"PORT_HOST": "1"}   # SDCC tests: behave as the generic "host" port
+# --c99: what agonc's default mode predefines besides (cpp.c), so that a
+# test's #if on __STDC_VERSION__ takes the branch the default mode will
+C99_PREDEF = {"__STDC_VERSION__": "199901L", "__STDC_HOSTED__": "1", "__STDC_NO_VLA__": "1",
+              "__STDC_NO_COMPLEX__": "1"}
 
 # ---------------------------------------------------------------- tables
 TYPE_KW = {"void", "char", "short", "int", "long", "float", "double", "signed",
@@ -928,8 +937,10 @@ def classify_file(path, predef, sdcc=False, dg_text=None):
         pass
     if re.search(r"dg-skip-if[^\n]*\bint16\b", raw):
         f["dg_skip_int16"] += 1
-    if re.search(r"dg-(additional-)?options[^\n]*-std=(gnu|c)(99|9x|11|1x|17|2x|23)", raw):
+    if re.search(r"dg-(additional-)?options[^\n]*-std=(gnu|c)(99|9x)\b", raw):
         f["dg_std_c99plus"] += 1
+    if re.search(r"dg-(additional-)?options[^\n]*-std=(gnu|c)(11|1x|17|18|2x|23)", raw):
+        f["dg_std_c11plus"] += 1
     if re.search(r"dg-(additional-)?options[^\n]*-std=(gnu|c)(89|90|iso9899:1990)", raw):
         f["dg_std_c89"] += 1
     text, line_comments = strip_comments(raw)
@@ -964,7 +975,8 @@ def classify_file(path, predef, sdcc=False, dg_text=None):
     rx("c99_complex", r"\b_Complex\b|\b_Imaginary\b")
     rx("c99_hex_float", HEXFLOAT_RE.pattern)
     rx("c99_pragma_op", r"\b_Pragma\s*\(")
-    rx("c99_ucn", r"\\[uU][0-9a-fA-F]{4}", fmt + " " + allc)
+    rx("c99_ucn", r"\\[uU][0-9a-fA-F]{4}", fmt)            # in strings: agonc has them
+    rx("c99_ucn_ident", r"\\[uU][0-9a-fA-F]{4}")           # in identifiers: it has not
     rx("c11_keyword", r"\b(?:_Static_assert|_Generic|_Alignof|_Alignas|_Noreturn|_Thread_local|_Atomic)\b")
     rx("c11_u8_string", r'\bu8""|\b[uU]""')
     rx("c23_keyword", r"\b(?:_BitInt|nullptr|constexpr|static_assert|typeof_unqual|alignas|alignof|thread_local)\b")
@@ -1230,7 +1242,7 @@ def classify_file(path, predef, sdcc=False, dg_text=None):
 # ---------------------------------------------------------------- categories
 def categories(f):
     c99 = [k for k in f if (k.startswith("c99_") or k.startswith("c11_") or k.startswith("c23_")
-                            or k in ("c99_header", "c95_header", "dg_std_c99plus"))]
+                            or k in ("c99_header", "c95_header", "dg_std_c99plus", "dg_std_c11plus"))]
     gnu_hard = [k for k in f if k in ("gnu_attr_semantic", "gnu_typeof", "gnu_asm", "gnu_hard_kw",
                                       "gnu_builtin_hard", "gnu_alloca", "gnu_nested_function",
                                       "gnu_statement_expr", "gnu_label_address", "gnu_computed_goto",
@@ -1252,7 +1264,8 @@ def main():
     args = sys.argv[1:]
     sdcc = "--sdcc" in args or "--sdcc-nohost" in args
     nohost = "--sdcc-nohost" in args
-    args = [a for a in args if not a.startswith("--sdcc")]
+    c99mode = "--c99" in args
+    args = [a for a in args if not a.startswith("--sdcc") and a != "--c99"]
     out_prefix, suite, root = args[0], args[1], args[2]
     pats = args[3:]
     files = []
@@ -1263,6 +1276,8 @@ def main():
     if sdcc:
         if not nohost:
             predef.update(SDCC_PREDEF)
+    if c99mode:
+        predef.update(C99_PREDEF)
     rows = []
     allkeys = set()
     for path in files:

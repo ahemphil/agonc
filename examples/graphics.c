@@ -61,22 +61,18 @@ int main(void)
         vdp_draw(460, 60 + i * 40);
     }
 
-    /* Filled shapes take their corners from the last points visited:
-     * a rectangle from the last point to the one given, a triangle with
-     * the last two, a circle centred on the last point through the one
-     * given. */
+    /* Filled shapes: a rectangle from the last point visited to the one
+     * given, a triangle from its three corners, and a circle's outline
+     * from its centre and radius. */
     vdp_gcol(0, RED);
     vdp_move(560, 120);
     vdp_filled_rect(760, 420);
 
     vdp_gcol(0, GREEN);
-    vdp_move(820, 120);
-    vdp_move(1020, 120);
-    vdp_triangle(920, 420);
+    vdp_filled_triangle(820, 120, 1020, 120, 920, 420);
 
     vdp_gcol(0, YELLOW);
-    vdp_move(1130, 270);
-    vdp_circle(1210, 270);
+    vdp_circle(1130, 270, 80);
 
     /* Text in colour, and on a coloured background (128 + colour). Mode 0
      * has 80 columns and 60 rows of 8 by 8 pixels, and a logical unit is

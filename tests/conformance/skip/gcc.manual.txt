@@ -11,3 +11,4 @@ pr27364.c INT32 (an unsigned int product beyond 24 bits, which the classifier do
 pr40668.c INT32 (0x12345678 in an unsigned int, which the classifier does not detect)
 pr81913.c INT32 (~0xba64fc as a 32-bit int, which the classifier does not detect)
 va-arg-8.c C99 (plain inline, inside an #if on __LONG_LONG_MAX__ that the classifier does not evaluate)
+bcp-1.c GNU_hard (__builtin_constant_p after inlining: GCC's optimiser, not C)

@@ -151,8 +151,17 @@ libraries, passes, the assembler and the image come later, at the link.
 | `prog.bin: image too large: ...` | the program does not fit in memory (below) |
 | `prog.asm: an .asm file is assembled alone` | an `.asm` input must be the only input |
 | `cannot open response file files.rsp` | the `@file` named does not exist |
-| `too many arguments` | more than 96 words, or 2,048 characters, after `@file` expansion |
-| `too many input files` | more than 32 inputs |
+| `no file matches src/*.cc` | no file in that folder matches the wildcard pattern |
+| `wildcards go in a file name, not a folder: src/*/a.c` | `*` and `?` work in the last part of a path only |
+| `cannot read the folder for x/*.c` | the pattern's folder does not exist |
+| `--lib needs -o and the library's name, ending in .s (as -o libutil.s)` | `--lib` writes a library: name it |
+| `--lib does not go with -E, -c or -S: it compiles and joins` | leave the other option out |
+| `util.asm: --lib takes .c, .i and .s files` | an `.asm` file is a program of its own |
+| `--big-tables is for agonc on a PC: the Agon's tables are fixed` | the option is the PC's alone |
+| `too many arguments` | more than 96 words, or 2,048 characters, after `@file` and wildcard expansion |
+| `too many input files` | more than 32 inputs: make some of them a library (`--lib`) |
+| `too many temporary files` | the `.s` files of a link fill `/tmp/agonc`'s list; with `-save-temps`, which keeps each `.i` and `.ir` as well, after about 25 inputs |
+| `command too long for a pass` | a pass's arguments reach 1,200 characters: shorter paths, or fewer `-I` and `-D` options |
 | `path too long: ...` | a path, or a temporary file's, reaches 128 characters |
 | warning: `util.s: input not used with -E, -c or -S` | that input was ignored |
 
@@ -179,8 +188,9 @@ a program's start-up code keeps at most 31 words after the program name,
 dropping the rest without a message; agonc is no exception. For a long list
 of files or options, put them in a file and give `@file`: the file's words
 are separated by spaces, tabs or line ends, with no quoting and no nested
-`@`, and the file must be under 1,200 bytes (`response file too long`
-otherwise). agonc passes long command lines to its passes the same way, as
+`@`, and it may be of any length (wildcards in it are expanded too); what
+counts is the 96 words and 2,048 characters all the arguments may come to.
+agonc passes long command lines to its passes the same way, as
 `/tmp/agonc/cpp.rsp` and the like, so a message such as `cc1: cannot open
 response file /tmp/agonc/cc1.rsp` means `/tmp/agonc` could not be written.
 
@@ -193,7 +203,7 @@ program that crashed can leave handles open, and then a pass reports
 
 | Message | Meaning and remedy |
 |---|---|
-| `cannot find include file mos_api.h` | not in the including file's folder, the `-I` folders, `/usrlib` or `/lib/agonc`; for a program from AgDev see [Porting from AgDev](07-porting-from-agdev.md) |
+| `cannot find include file graphx.h` | not in the including file's folder, the `-I` folders, `/usrlib` or `/lib/agonc`; for a program from AgonDev or AgDev see [Porting from AgonDev and AgDev](07-porting-from-agdev.md) |
 | `#error text` | the source asked for this error |
 | `#warning text` | a warning the source asked for (default mode) |
 | `unknown directive #warning` | `#warning` in strict mode, or a misspelt directive |
@@ -235,7 +245,9 @@ full](#when-a-table-is-full).
 | `identifier longer than 47 characters: name` | names are significant to 47 characters, and a longer one is refused rather than cut |
 | `string literal longer than 509 characters` | the limit holds after adjacent literals are joined; use an array of shorter strings, or a file |
 | `more than 31 arguments in a call` | also `more than 31 parameters`: C89's limit |
-| `more than 127 members in a struct` | also `more than 127 enumerators in an enum` |
+| `more than 127 members in a struct` | C89's limit |
+| `more than 1023 enumerators in an enum` | C99's limit |
+| `an enumerator's value does not fit in int (-8388608 to 8388607)` | `int` is 24 bits: a value written for a 32-bit `int`, an unsigned one such as `-1U` (0xFFFFFF), or one counted up past 8388607 |
 | `static function used but never defined: f` | declared `static`, called, and not defined in this file |
 | `expected ';' after a declaration` | a syntax error; the line is that of the token before the gap |
 | `expected an expression` | a syntax error, often C99 or GCC syntax (below) |
@@ -254,7 +266,7 @@ normally by including the right header.
 ### Code written for C99 or GCC
 
 The default mode takes C99's language but for variable-length arrays and
-complex numbers ([The
+complex numbers, and its library but for the wide-character headers ([The
 language](03-the-language.md#the-two-modes) lists it). What it lacks fails
 with a syntax error that does not name the feature:
 
@@ -321,21 +333,24 @@ defines, by ez80asm.
 | `declaration after a statement (a C99 feature)` | strict mode only; C99 allows it, and so does the default mode |
 | `control reaches the end of a function that returns a value` | a path ends without `return` |
 | `'return;' in a function that returns a value` | the caller gets an undefined value |
+| `'return' with a void expression in a void function` | `return f();` with `f` `void` too: default mode only (strict mode makes it an error); write `f(); return;` |
 | `incompatible pointer types (assignment)` | also `argument`, `initialiser`, `return`: a cast says you mean it |
 | `assignment discards a const or volatile qualifier` | a `const char *` stored in a `char *`, say |
 | `integer converted to pointer without a cast (argument)` | often a missing header, or `int` where a pointer is meant |
 | `pointer converted to integer without a cast (assignment)` | as above, the other way |
 | `comparison between a pointer and an integer` | compare with a pointer, or `0` |
 | `shift count outside 0..23` | `int` is 24 bits: 0..31 for `long`, 0..63 for `long long` |
+| `integer overflow in a constant expression` | a signed `+`, `-`, `*` or `/` of constants whose result its type cannot hold, as `8388607 + 1` or `4096 * 4096`; the value is the wrapped one the code would give |
 | `integer constant is so large that it is unsigned` | a decimal constant beyond `long long` |
 | `floating constant out of range for double (it is infinity)` | also `for float` |
 | `a multi-character character constant` | `'ab'` is `0x6162` |
 | `an array assumed to have one element: a` | `int a[];` with no size anywhere in the file |
 | `a declaration that declares nothing` | `struct { int a; };`, with neither a tag nor a name |
-| `unused static function` | a `static` function nothing calls |
+| `unused static function: f` | a `static` function nothing calls; given where it was declared, a header's file and line for one defined in a header |
 
-The shift warning catches a common surprise in code written for a 32-bit
-`int`: `1 << 24` is a `long`'s job here, `1L << 24`.
+The shift and overflow warnings catch a common surprise in code written
+for a 32-bit `int`: `1 << 24` and `4096 * 4096` are a `long`'s job here,
+`1L << 24` and `4096L * 4096`.
 
 ## When a table is full
 
@@ -361,8 +376,8 @@ smaller: what the limit counts says which piece.
 | cpp: macro text | 32,000 bytes | names and replacements |
 | cpp: line | 4,096 | characters in one logical line |
 | cpp: `#include` nesting, `#if` nesting | 8, 32 | levels |
-| cc1: identifiers, identifier characters | 2,000, 20,000 | distinct names in one file, headers included |
-| cc1: global symbols | 1,200 | file-scope names in one file |
+| cc1: identifiers, identifier characters | 3,000, 32,000 | distinct names in one file, headers included (`<agon/vdp.h>` takes about 700 and 10,000) |
+| cc1: global symbols | 2,000 | file-scope names in one file, headers' declarations included |
 | cc1: types, parameter types | 800, 1,500 | one file |
 | cc1: struct and enum tags, struct members | 150, 800 | one file |
 | cc1: locals in one function | 300 | one function, its blocks included |
@@ -372,8 +387,9 @@ smaller: what the limit counts says which piece.
 | cc1: expression too complex | 500 nodes | one expression |
 | cc2: instructions in one function | 4,000 | one function's generated code |
 | cc2: string literals and double constants | 400 | one function |
-| ld: input files | 32 | the link, library files included |
-| ld: sections, symbols, references | 1,500, 3,000, 8,000 | the whole program, library included |
+| ld: input files | 48 | the link, library files included |
+| ld: sections, symbols, references | 1,500, 3,000, 8,000 | your files, and the library sections the program uses (all of a library without an index) |
+| ld: directory entries | 4,000 | the names the indexed libraries define, all together |
 
 A per-file table means splitting the source file, or including fewer
 headers: every name a header declares counts, used or not. A per-function
@@ -384,10 +400,12 @@ limit, the `.ir` line is in the intermediate file: with `-save-temps`, the
 nearest line above it of the form `F name g ...` (or `s` for a `static`
 function) names the function.
 
-The linker's limits cover the whole program. Up to five of its 32 input
-files are the library's own (`crt0.s`, `rt.s`, `libc.s`, `libm.s` and
-`libagon.s`), so 27 source files and `-l` libraries together always fit;
-join small libraries into one. `agonc -v` prints the linker's use of each
+The linker's limits cover the whole program: every section of your own
+files, and of an indexed library only the sections the program uses (a
+library without an index counts whole, so index a large one). Up to five
+of its 48 input files are the library's own (`crt0.s`, `rt.s`, `libc.s`,
+`libm.s` and `libagon.s`), so agonc's 32 inputs and a dozen `-l` libraries
+always fit. `agonc -v` prints the linker's use of each
 of its tables (`ld: tables: sections 612/1500, ...`); the other passes print
 theirs (`cc1: peaks: ...`) only when run on their own with `-v`.
 

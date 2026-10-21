@@ -1,10 +1,10 @@
 # The language
 
-agonc compiles C99 as C11 left it mandatory: all of the language but
-variable-length arrays and complex numbers, which C11 made optional, with
-C99's library but for `<complex.h>`, `<fenv.h>`, `<tgmath.h>` and the wide
-characters ([The C library](05-c-library.md)). It adds a few things from
-GCC that existing programs use, and
+agonc compiles C99: all of the language but variable-length arrays and
+complex numbers, which C11 made optional, with C99's library but for
+`<complex.h>`, `<fenv.h>`, `<tgmath.h>` and the wide-character library,
+`<wchar.h>` and `<wctype.h>` ([The C library](05-c-library.md)). It adds a
+few things from GCC that existing programs use, and
 `-ansi` gives strict ANSI C89 (the same language as ISO C90), the
 conforming mode. This chapter covers what is particular to agonc; the
 formal account, following the standard's list of implementation-defined
@@ -12,8 +12,9 @@ behaviour, is [the language specification](../c89_spec.md).
 
 ## The two modes
 
-By default agonc accepts C99, but for variable-length arrays and complex
-numbers, and is strict about calls to undeclared functions. `-ansi` (or
+By default agonc accepts C99, but for variable-length arrays, complex
+numbers and the wide-character library, and is strict about calls to
+undeclared functions. `-ansi` (or
 `-std=c89`, `-std=c90`) selects strict C89, the conforming mode, for code
 that must also build with a C89 compiler. `-std=c99` and `-std=gnu99` are
 accepted and select the default mode, so makefiles written for gcc work.
@@ -26,12 +27,17 @@ accepted and select the default mode, so makefiles written for gcc work.
 | implicit `int` (`static x;`, `f() { ... }`) | accepted, with a warning | accepted, with a warning |
 | a declaration after a statement | accepted | accepted, with a warning |
 | a declaration in a `for`, `_Bool`, `inline`, `restrict`, flexible array members, hexadecimal floating constants, designated initialisers, compound literals, variadic macros, `_Pragma` | accepted | errors |
-| a comma after the last enumerator, `#warning`, non-constant initialisers for local arrays and structures | accepted | errors |
+| a comma after the last enumerator, `#warning`, non-constant initialisers for local arrays and structures (bit-fields too), `static` and qualifiers in a parameter's array brackets (`int a[static 3]`) | accepted | errors |
+| `return f();` in a `void` function, `f` returning `void` too (C forbids it; GCC allows it) | accepted, with a warning | an error |
 | `__func__` | accepted | accepted |
 | trigraphs (`??=` and the rest) | ignored, with a warning | recognised |
 | `asm` | a keyword | an ordinary name; use `__asm` |
 
-C99's variable-length arrays and complex numbers are not planned.
+C99's variable-length arrays and complex numbers are not planned. Its
+wide-character library, `<wchar.h>` and `<wctype.h>`, is not provided
+either, though it may come later: a program that includes either header
+stops with `cannot find include file`. (`wchar_t`, wide character
+constants and `L"..."` strings are there, in both modes.)
 
 The default mode rejects calls to undeclared functions because, on this
 target, they hide real errors: a function that returns `long`, `float`,
@@ -91,7 +97,8 @@ is 1, and `<stdbool.h>` defines `bool`, `true` and `false` (in strict mode
 `bool` is `int`). `_Pragma("...")` is ignored, with a warning, as `#pragma`
 is. A hexadecimal floating constant (`0x1.8p3`) is correctly rounded.
 `__STDC_VERSION__` is `199901L`, and C11's `__STDC_NO_VLA__` and
-`__STDC_NO_COMPLEX__` are 1, so that a program can tell what is missing.
+`__STDC_NO_COMPLEX__` are 1, so that a program can tell what is missing;
+no standard macro says that the wide-character library is absent.
 Designated initialisers may come in any order (`{ [5] = 1, [2] = 3 }`,
 `{ .y = 2, .x = 1 }`), and a later one replaces an earlier one. A compound
 literal in a function, `(struct point){ 1, 2 }`, is filled each time it is
@@ -131,8 +138,10 @@ only into programs that use these types.
 - **Predefined macros**: `__AGONC__`, `__EZ80__` and `__ADL__` are 1; GCC's
   `__SIZEOF_INT__` (3), `__INT_MAX__` and the like have this target's values.
 
-Not provided, from C99 or GCC: variable-length arrays, `_Complex`,
-statement expressions, and GCC's extended `asm` with operands.
+Not provided, from C99 or GCC: variable-length arrays, `_Complex`, the
+wide-character library (`<wchar.h>`, `<wctype.h>`), universal character
+names in identifiers (they work in strings), statement expressions, and
+GCC's extended `asm` with operands.
 
 ## Limits
 
@@ -152,7 +161,7 @@ agonc keeps to sizes nearer C89's. The ones a large program may meet:
 | `case` labels in one function | 300 |
 | members of one structure or union | 127 |
 | members of all structures and unions in one file, together | 800 |
-| constants in one enumeration | 127 |
+| constants in one enumeration | 1,023 |
 | characters in one string literal, after joining adjacent ones | 509 |
 | items of an initialiser that a designator may go back over | 512 |
 | characters in a logical source line | 4,096 |

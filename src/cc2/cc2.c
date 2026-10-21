@@ -649,6 +649,7 @@ static void gen_asg_l(int n);
 static void gen_incdec_l(int n);
 static void gen_cv(int n);
 static void gen_long_nz(int n);
+static int lconst_binary(int n);
 static void store_lvalue(int a, int size);
 static int direct_lvalue2(int a);
 
@@ -1036,9 +1037,432 @@ static void mul_const(int k)
     }
 }
 
+/* ---- constant operands inline (-O) ----------------------------------------
+ * With -O, an int operator whose right operand is a constant can do
+ * without its helper: a shift by a constant count; &, | and ^ with a
+ * constant; and / and % by a power of two (the acc comparison's A1-A3).
+ * -O0 keeps the calls. The code here may change what the helpers may (A,
+ * F, BC, DE; abi.md section 6), and nothing else.
+ *
+ * HL's upper byte (HLU) cannot be read or written on its own, so the right
+ * shifts pass it through the stack. "dec sp / push hl / inc sp / pop de"
+ * leaves D = HLU and E = H; "ld d,a / push de / inc sp / push hl / inc sp
+ * / pop hl / inc sp" makes HL = A:HLU:H, a right shift by 8 with A as the
+ * new top byte. Neither takes SP above where it started, and every byte
+ * still to be read is at or above SP throughout, so an interrupt, which
+ * pushes below SP, cannot disturb one. The constants are 24-bit (wrap24),
+ * so the PC's cc2 and the Agon's decide alike. */
+
+/* k if v is 2^k (0 to 22), else -1 */
+static int pow2(int v)
+{
+    int k;
+
+    for (k = 0; k <= 22; k++) {
+        if (v == 1 << k)
+            return k;
+    }
+    return -1;
+}
+
+/* A = HLU, E = H; HL is kept */
+static void a_from_hlu(void)
+{
+    emit("dec sp", 1);
+    emit("push hl", 1);
+    emit("inc sp", 1);
+    emit("pop de", 1);              /* D = HLU, E = H */
+    emit("ld a,d", 1);
+}
+
+/* HL = A:HLU:H */
+static void hl_down8(void)
+{
+    emit("ld d,a", 1);
+    emit("push de", 1);
+    emit("inc sp", 1);              /* A is at SP */
+    emit("push hl", 1);
+    emit("inc sp", 1);              /* H, HLU, A from SP up */
+    emit("pop hl", 1);
+    emit("inc sp", 1);
+}
+
+/* HL >>= k (0 to 23), arithmetic if sign, else logical. Below 8 places,
+ * A:HL (32 bits, A the sign's extension) shifts left 8 - k places with
+ * add hl,hl / rla, and its top three bytes are the answer; from 8 places
+ * the bytes move first, then shift right. */
+static void shr_const(int k, int sign)
+{
+    int i;
+
+    if (k == 0)
+        return;
+    if (k >= 16) {
+        a_from_hlu();
+        for (i = 16; i < k; i++)
+            emit(sign ? "sra a" : "srl a", 2);
+        extend_a(sign);
+        return;
+    }
+    if (k >= 8) {
+        a_from_hlu();
+        extend_a(sign);             /* HL = the fill:the fill:HLU */
+        emit("ld h,l", 1);
+        emit("ld l,e", 1);          /* HL = the fill:HLU:H, HL >> 8 */
+        for (i = 8; i < k; i++) {
+            emit(sign ? "sra h" : "srl h", 2);
+            emit("rr l", 2);
+        }
+        return;
+    }
+    if (sign) {
+        emit("add hl,hl", 1);       /* carry = the sign */
+        emit("sbc a,a", 1);         /* A = 0 or 255, the carry kept */
+        emit("rla", 1);
+        i = 1;
+    } else {
+        emit("xor a", 1);
+        i = 0;
+    }
+    for (; i < 8 - k; i++) {
+        emit("add hl,hl", 1);
+        emit("rla", 1);
+    }
+    hl_down8();
+}
+
+/* What &, | or ^ with the byte c does to a byte of HL. */
+#define BY_KEEP 0
+#define BY_ZERO 1
+#define BY_ONES 2
+#define BY_OP 3
+
+static int by_act(int b, int c)
+{
+    if (b == B_AND)
+        return c == 255 ? BY_KEEP : c == 0 ? BY_ZERO : BY_OP;
+    if (b == B_OR)
+        return c == 0 ? BY_KEEP : c == 255 ? BY_ONES : BY_OP;
+    return c == 0 ? BY_KEEP : BY_OP;
+}
+
+/* A = A op c; ^ 255 is cpl */
+static void a_op(int b, int c)
+{
+    if (b == B_XOR && c == 255) {
+        emit("cpl", 1);
+        return;
+    }
+    sprintf(fmt, "%s %d", b == B_AND ? "and" : b == B_OR ? "or" : "xor", c);
+    emit(fmt, 2);
+}
+
+/* HLU = HLU op c, through HL's copy on the stack (IY its address); HL
+ * and E are kept */
+static void hlu_op(int b, int c)
+{
+    int act;
+
+    act = by_act(b, c);
+    if (act == BY_KEEP)
+        return;
+    emit("push hl", 1);
+    emit("ld iy,0", 5);
+    emit("add iy,sp", 2);
+    if (act == BY_OP) {
+        emit("ld a,(iy+2)", 3);
+        a_op(b, c);
+        emit("ld (iy+2),a", 3);
+    } else {
+        emit(act == BY_ZERO ? "ld (iy+2),0" : "ld (iy+2),255", 4);
+    }
+    emit("pop hl", 1);
+}
+
+/* register r (h, l or e) = r op c in place */
+static void byte_op(int b, int c, char *r)
+{
+    int act;
+
+    act = by_act(b, c);
+    if (act == BY_KEEP)
+        return;
+    if (act == BY_OP) {
+        sprintf(fmt, "ld a,%s", r);
+        emit(fmt, 1);
+        a_op(b, c);
+        sprintf(fmt, "ld %s,a", r);
+    } else {
+        sprintf(fmt, "ld %s,%d", r, act == BY_ZERO ? 0 : 255);
+    }
+    emit(fmt, act == BY_OP ? 1 : 2);
+}
+
+/* HL = HL op k for &, | and ^. H and L are worked in place, and HLU
+ * through the stack (hlu_op); but when HLU becomes 0 (&) or 255 (|), sbc
+ * hl,hl makes all of HL that, and H and L are put back from B and A. */
+static void bitop_const(int b, int k)
+{
+    int top;
+    int ah;
+    int al;
+    int c1;
+    int c0;
+
+    c1 = (k >> 8) & 255;
+    c0 = k & 255;
+    top = by_act(b, (k >> 16) & 255);
+    if (top == BY_KEEP || top == BY_OP) {
+        hlu_op(b, (k >> 16) & 255);
+        byte_op(b, c1, "h");
+        byte_op(b, c0, "l");
+        return;
+    }
+    ah = by_act(b, c1);
+    al = by_act(b, c0);
+    if (ah == BY_KEEP) {
+        emit("ld b,h", 1);
+    } else if (ah == BY_OP) {
+        emit("ld a,h", 1);
+        a_op(b, c1);
+        emit("ld b,a", 1);
+    }
+    if (al != top) {
+        emit("ld a,l", 1);
+        if (al == BY_OP)
+            a_op(b, c0);            /* and, or, xor: the carry clear */
+    }
+    if (top == BY_ONES)
+        emit("scf", 1);
+    else if (al != BY_OP)
+        emit("or a", 1);
+    emit("sbc hl,hl", 2);           /* HL = 0, or -1 */
+    if (al != top)
+        emit("ld l,a", 1);
+    if (ah != top)
+        emit("ld h,b", 1);
+}
+
+/* HL += m if HL is negative (the bias that makes a shift round toward
+ * zero) */
+static void sign_bias(int m)
+{
+    int l;
+
+    emit("push hl", 1);
+    emit("add hl,hl", 1);           /* carry = the sign */
+    emit("pop hl", 1);
+    l = new_label();
+    emit_jump(C_NC, l);
+    if (m == 1) {
+        emit("inc hl", 1);
+    } else {
+        sprintf(fmt, "ld de,%d", m);
+        emit(fmt, 4);
+        emit("add hl,de", 1);
+    }
+    emit_label(l);
+}
+
+/* An unsigned / or % by 2^p is a shift or a mask: *b and *k rewritten. */
+static void norm_const(int *b, int *k)
+{
+    int p;
+
+    p = pow2(*k);
+    if (*b == B_DIVU && p >= 0) {
+        *b = B_SHRU;
+        *k = p;
+    } else if (*b == B_REMU && p >= 0 && p <= 16) {
+        *b = B_AND;
+        *k = *k - 1;
+    }
+}
+
+/* Can HL op k be done inline (after norm_const)? */
+static int const_ok(int b, int k)
+{
+    int p;
+
+    switch (b) {
+    case B_SHL:
+    case B_SHRS:
+    case B_SHRU:
+        return k >= 0 && k <= 23;
+    case B_AND:
+    case B_OR:
+    case B_XOR:
+        return 1;
+    case B_DIVS:
+        return pow2(k) >= 0;
+    case B_REMS:
+        p = pow2(k);
+        return p >= 0 && p <= 16;
+    default:
+        return 0;
+    }
+}
+
+/* HL = HL op k inline, where const_ok(b, k). A signed x / 2^p is
+ * (x + (x < 0 ? 2^p - 1 : 0)) >> p, which rounds toward zero as / does;
+ * x % 2^p is x less that quotient times 2^p, which is the biased x with
+ * its low p bits cleared. */
+static void const_emit(int b, int k)
+{
+    int i;
+    int p;
+
+    switch (b) {
+    case B_SHL:
+        for (i = 0; i < k; i++)
+            emit("add hl,hl", 1);
+        break;
+    case B_SHRS:
+    case B_SHRU:
+        shr_const(k, b == B_SHRS);
+        break;
+    case B_AND:
+    case B_OR:
+    case B_XOR:
+        bitop_const(b, k);
+        break;
+    case B_DIVS:
+        p = pow2(k);
+        if (p > 0) {
+            sign_bias(k - 1);
+            shr_const(p, 1);
+        }
+        break;
+    default:                        /* B_REMS */
+        p = pow2(k);
+        if (p == 0) {
+            emit_ld_hl_const(0);
+            break;
+        }
+        emit("push hl", 1);         /* x */
+        sign_bias(k - 1);
+        bitop_const(B_AND, ~(k - 1));
+        emit("ex de,hl", 1);
+        emit("pop hl", 1);
+        emit("or a", 1);
+        emit("sbc hl,de", 2);       /* x - the biased x's high bits */
+        break;
+    }
+}
+
+/* A byte loaded without its sign (0 to 255), / or % a constant k that is
+ * no power of two, by the eZ80's 8-bit multiply (the acc comparison's
+ * A5): x / k is x * M >> s, with M (at most 255) and s (8 to 16) the
+ * first pair that gives x / k for every byte x, found here by trying
+ * them all; x % k is x - (x / k) * k. 0 (nothing emitted) if no pair
+ * does. MLT HL multiplies H by L into all of HL. */
+static int byte_divide(int a, int b, int k)
+{
+    int s;
+    int m;
+    int x;
+    int i;
+
+    if (k > 255) {
+        gen_load_a(a);              /* x / k is 0, x % k is x */
+        if (b == B_DIVU)
+            emit_ld_hl_const(0);
+        else
+            extend_a(0);
+        return 1;
+    }
+    for (s = 8; s <= 16; s++) {
+        m = ((1 << s) + k - 1) / k;     /* 2^s / k, rounded up */
+        if (m > 255)
+            return 0;
+        for (x = 0; x < 256 && (x * m) >> s == x / k; x++)
+            ;
+        if (x == 256)
+            break;
+    }
+    if (s > 16)
+        return 0;
+    gen_load_a(a);
+    if (b == B_REMU)
+        emit("ld c,a", 1);          /* x */
+    emit("ld h,a", 1);
+    sprintf(fmt, "ld l,%d", m);
+    emit(fmt, 2);
+    emit("mlt hl", 2);              /* HL = x * M */
+    emit("ld a,h", 1);
+    for (i = 8; i < s; i++)
+        emit("srl a", 2);           /* A = x / k */
+    if (b == B_REMU) {
+        emit("ld h,a", 1);
+        sprintf(fmt, "ld l,%d", k);
+        emit(fmt, 2);
+        emit("mlt hl", 2);          /* L = (x / k) * k, at most x */
+        emit("ld a,c", 1);
+        emit("sub l", 1);
+    }
+    extend_a(0);
+    return 1;
+}
+
+/* Node n, a binary I operator with a constant operand, inline (-O): 1 if
+ * done, 0 (nothing emitted) if it is left to the helper. A byte loaded
+ * without its sign is 0 to 255, so its signed / % >> are the unsigned
+ * ones, and a shift or a byte mask of it works in A. */
+static int const_binary(int n)
+{
+    int b;
+    int a;
+    int r;
+    int k;
+    int i;
+
+    b = nodes[n].op - N_BIN;
+    a = nodes[n].a;
+    r = nodes[n].b;
+    if ((b == B_AND || b == B_OR || b == B_XOR) && nodes[a].op == N_C) {
+        a = nodes[n].b;             /* k & x: the constant on the right */
+        r = nodes[n].a;
+    }
+    if (nodes[r].op != N_C)
+        return 0;
+    k = nodes[r].val;
+    if (is_byte_load(a) && !nodes[a].sign) {
+        if (b == B_DIVS)
+            b = B_DIVU;
+        else if (b == B_REMS)
+            b = B_REMU;
+        else if (b == B_SHRS)
+            b = B_SHRU;
+    }
+    norm_const(&b, &k);
+    if (b == B_SHRU && is_byte_load(a) && !nodes[a].sign && k >= 0 && k <= 7) {
+        gen_load_a(a);
+        for (i = 0; i < k; i++)
+            emit("srl a", 2);
+        extend_a(0);
+        return 1;
+    }
+    if (b == B_AND && is_byte_load(a) && (k & 0xFFFF00) == 0) {
+        gen_load_a(a);              /* the mask's high bytes clear: the byte in A */
+        if (k != 255)
+            a_op(B_AND, k);
+        extend_a(0);
+        return 1;
+    }
+    if ((b == B_DIVU || b == B_REMU) && is_byte_load(a) && !nodes[a].sign && k > 0
+        && byte_divide(a, b, k))
+        return 1;
+    if (!const_ok(b, k))
+        return 0;
+    gen(a);
+    const_emit(b, k);
+    return 1;
+}
+
 /* A binary operator on I or L operands (gen_fbinary does the floating and
  * long long ones). A constant multiplier becomes shifts and adds, and a
- * constant addend or subtrahend goes straight into DE. */
+ * constant addend or subtrahend goes straight into DE; with -O, other
+ * constant operands go inline too (const_binary). */
 static void gen_binary(int n)
 {
     int b;
@@ -1047,10 +1471,14 @@ static void gen_binary(int n)
     b = nodes[n].op - N_BIN;
     r = nodes[n].b;
     if (nodes[n].okind == K_L) {
+        if (optimize && lconst_binary(n))
+            return;
         gen_operands_l(n);
         lbinop(b);
         return;
     }
+    if (optimize && const_binary(n))
+        return;
     if (b == B_MUL && nodes[r].op == N_C && mul_cost(nodes[r].val) <= 9) {
         gen(nodes[n].a);
         mul_const(nodes[r].val);
@@ -1163,10 +1591,40 @@ static void gen_asg(int n)
     int a;
     int size;
     int sign;
+    int b;
+    int k;
 
     a = nodes[n].a;
     size = nodes[n].size;
     sign = nodes[n].sign;
+    b = nodes[n].val;
+    k = nodes[nodes[n].b].val;
+    if (optimize && nodes[nodes[n].b].op == N_C)
+        norm_const(&b, &k);
+    if (optimize && nodes[nodes[n].b].op == N_C && const_ok(b, k)) {
+        /* *a op= constant inline (-O): *a is loaded, worked and stored */
+        if (size == 2 ? direct_lvalue2(a) : direct_lvalue(a)) {
+            load_lvalue(a, size, sign);
+            const_emit(b, k);
+            store_lvalue(a, size);
+        } else {
+            gen(a);
+            emit("push hl", 1);         /* the address */
+            if (size == 1) {
+                emit("ld a,(hl)", 1);
+                extend_a(sign);
+            } else {
+                emit("ld hl,(hl)", 2);
+                if (size == 2)
+                    extend_hl(2, sign);
+            }
+            const_emit(b, k);
+            emit("pop de", 1);
+            store_hl_at_de(size);
+        }
+        extend_hl(size, sign);
+        return;
+    }
     if (size == 2 ? direct_lvalue2(a) : direct_lvalue(a)) {
         gen(nodes[n].b);                /* HL = rhs */
         emit("push hl", 1);
@@ -1396,6 +1854,258 @@ static void lbinop(int b)
     emit_call(lhelper[b]);
 }
 
+/* ---- long constant operands inline (-O): the acc comparison's A8 ----------
+ * As the int ones (const_binary), on E:UHL: &, | and ^ a byte at a time
+ * (HLU through the stack, hlu_op); shifts by a constant count; / and % by
+ * a power of two. gen_jump adds a long tested against 0, or compared with
+ * a constant, a byte at a time. */
+
+/* constant node r's bytes, the low one first */
+static void lconst_bytes(int r, int *c)
+{
+    c[0] = nodes[r].val & 255;
+    c[1] = (nodes[r].val >> 8) & 255;
+    c[2] = (nodes[r].val >> 16) & 255;
+    c[3] = nodes[r].hi & 255;
+}
+
+/* p if long constant node r is 2^p (0 to 31), else -1 */
+static int lpow2(int r)
+{
+    int p;
+
+    if (nodes[r].hi == 0)
+        return nodes[r].val == -8388608 ? 23 : pow2(nodes[r].val);
+    if (nodes[r].val != 0)
+        return -1;
+    p = pow2(nodes[r].hi);
+    return p >= 0 && p <= 7 ? p + 24 : -1;
+}
+
+/* E:UHL = E:UHL op the bytes c[] */
+static void lbitop(int b, int *c)
+{
+    hlu_op(b, c[2]);
+    byte_op(b, c[3], "e");
+    byte_op(b, c[1], "h");
+    byte_op(b, c[0], "l");
+}
+
+/* E:UHL <<= k (0 to 31): a byte at a time, then add hl,hl / rl e */
+static void lshl_const(int k)
+{
+    int i;
+
+    if (k >= 24) {
+        emit("ld e,l", 1);
+        emit_ld_hl_const(0);
+        for (i = 24; i < k; i++)
+            emit("sla e", 2);
+        return;
+    }
+    for (; k >= 8; k -= 8) {
+        a_from_hlu();               /* A = HLU (E goes: it is shifted out) */
+        emit("push hl", 1);
+        emit("dec sp", 1);
+        emit("pop hl", 1);          /* HL = H:L:the byte below */
+        emit("inc sp", 1);
+        emit("ld l,0", 2);
+        emit("ld e,a", 1);
+    }
+    for (i = 0; i < k; i++) {
+        emit("add hl,hl", 1);
+        emit("rl e", 2);
+    }
+}
+
+/* E:UHL >>= 8: the fill:E:HLU:H, the fill E's sign (or 0) */
+static void lshr8(int sign)
+{
+    emit("ld a,e", 1);
+    hl_down8();                     /* HL = E:HLU:H; E is kept */
+    if (sign) {
+        emit("ld a,e", 1);
+        emit("rla", 1);
+        emit("sbc a,a", 1);
+        emit("ld e,a", 1);
+    } else {
+        emit("ld e,0", 2);
+    }
+}
+
+/* E:UHL >>= k (0 to 31), arithmetic if sign. Whole bytes move first; the
+ * rest is shr_const's way, on 40 bits: the fill:E:UHL shifts left 8 - k
+ * places (add hl,hl / rl e / rla) and its top four bytes are the answer. */
+static void lshr_const(int k, int sign)
+{
+    int i;
+
+    if (k == 0)
+        return;
+    if (k >= 24) {
+        emit("ld a,e", 1);
+        for (i = 24; i < k; i++)
+            emit(sign ? "sra a" : "srl a", 2);
+        extend_a(sign);             /* HL = the fill:the fill:A */
+        emit("ld e,h", 1);
+        return;
+    }
+    for (; k >= 8; k -= 8)
+        lshr8(sign);
+    if (k == 0)
+        return;
+    if (sign) {
+        emit("ld a,e", 1);
+        emit("rla", 1);
+        emit("sbc a,a", 1);         /* A = the fill */
+    } else {
+        emit("xor a", 1);
+    }
+    for (i = 0; i < 8 - k; i++) {
+        emit("add hl,hl", 1);
+        emit("rl e", 2);
+        emit("rla", 1);
+    }
+    emit("ld c,a", 1);
+    emit("ld a,e", 1);
+    hl_down8();                     /* HL = E:HLU:H */
+    emit("ld e,c", 1);
+}
+
+/* E:UHL += 2^p - 1 if it is negative (p 1 to 30) */
+static void lsign_bias(int p)
+{
+    int l;
+
+    emit("bit 7,e", 2);
+    l = new_label();
+    emit_jump(C_Z, l);
+    sprintf(fmt, "ld bc,%d", p >= 24 ? -1 : (1 << p) - 1);
+    emit(fmt, 4);
+    emit("add hl,bc", 1);
+    emit("ld a,e", 1);
+    sprintf(fmt, "adc a,%d", p > 24 ? (1 << (p - 24)) - 1 : 0);
+    emit(fmt, 2);
+    emit("ld e,a", 1);
+    emit_label(l);
+}
+
+/* E:UHL / or % 2^p (b one of the four divisions), as const_emit does it */
+static void lpow2_op(int b, int p)
+{
+    int c[4];
+    int i;
+
+    if (p == 0) {                   /* by 1 */
+        if (b == B_REMU || b == B_REMS) {
+            emit_ld_hl_const(0);
+            emit("ld e,0", 2);
+        }
+        return;
+    }
+    if (b == B_DIVU) {
+        lshr_const(p, 0);
+        return;
+    }
+    if (b == B_DIVS) {
+        lsign_bias(p);
+        lshr_const(p, 1);
+        return;
+    }
+    for (i = 0; i < 4; i++)         /* 2^p - 1, byte by byte */
+        c[i] = p >= 8 * i + 8 ? 255 : p > 8 * i ? (1 << (p - 8 * i)) - 1 : 0;
+    if (b == B_REMU) {
+        lbitop(B_AND, c);
+        return;
+    }
+    save_long();                    /* x */
+    lsign_bias(p);
+    for (i = 0; i < 4; i++)
+        c[i] = c[i] ^ 255;
+    lbitop(B_AND, c);
+    restore_left();                 /* A:UBC = x, E:UHL = the biased x's high bits */
+    emit("push hl", 1);
+    emit("push bc", 1);
+    emit("pop hl", 1);
+    emit("pop bc", 1);              /* HL = x's low 24 bits, BC the other's */
+    emit("or a", 1);
+    emit("sbc hl,bc", 2);
+    emit("sbc a,e", 1);
+    emit("ld e,a", 1);              /* E:UHL = x - them */
+}
+
+/* Can E:UHL op (constant node r) be done inline? */
+static int lconst_ok(int b, int r)
+{
+    int p;
+
+    switch (b) {
+    case B_SHL:
+    case B_SHRS:
+    case B_SHRU:
+        return nodes[r].val >= 0 && nodes[r].val <= 31;
+    case B_AND:
+    case B_OR:
+    case B_XOR:
+        return 1;
+    case B_DIVU:
+    case B_REMU:
+        return lpow2(r) >= 0;
+    case B_DIVS:
+    case B_REMS:
+        p = lpow2(r);
+        return p >= 0 && p <= 30;
+    default:
+        return 0;
+    }
+}
+
+static void lconst_emit(int b, int r)
+{
+    int c[4];
+
+    switch (b) {
+    case B_SHL:
+        lshl_const(nodes[r].val);
+        break;
+    case B_SHRS:
+    case B_SHRU:
+        lshr_const(nodes[r].val, b == B_SHRS);
+        break;
+    case B_AND:
+    case B_OR:
+    case B_XOR:
+        lconst_bytes(r, c);
+        lbitop(b, c);
+        break;
+    default:
+        lpow2_op(b, lpow2(r));
+        break;
+    }
+}
+
+/* Node n, a binary operator on longs with a constant operand, inline
+ * (-O): 1 if done, 0 (nothing emitted) if it keeps the helper. */
+static int lconst_binary(int n)
+{
+    int b;
+    int a;
+    int r;
+
+    b = nodes[n].op - N_BIN;
+    a = nodes[n].a;
+    r = nodes[n].b;
+    if ((b == B_AND || b == B_OR || b == B_XOR) && nodes[a].op == N_C) {
+        a = nodes[n].b;             /* k & x: the constant on the right */
+        r = nodes[n].a;
+    }
+    if (nodes[r].op != N_C || !lconst_ok(b, r))
+        return 0;
+    gen(a);
+    lconst_emit(b, r);
+    return 1;
+}
+
 /* The long at address node a into E:UHL. (ix+d) works only when both d
  * and d+3 fit the displacement; any other address goes into IY, the
  * scratch index register, for the two indexed loads. */
@@ -1455,6 +2165,21 @@ static void gen_store_l(int n)
  * helpers that clobber IY. */
 static void gen_asg_l(int n)
 {
+    if (optimize && nodes[nodes[n].b].op == N_C && lconst_ok(nodes[n].val, nodes[n].b)) {
+        /* *a op= constant inline (-O); the address waits on the stack, as
+         * lconst_emit may use IY */
+        gen(nodes[n].a);
+        emit("push hl", 1);
+        emit("push hl", 1);
+        emit("pop iy", 2);
+        emit("ld hl,(iy+0)", 3);
+        emit("ld e,(iy+3)", 3);         /* E:UHL = *addr */
+        lconst_emit(nodes[n].val, nodes[n].b);
+        emit("pop iy", 2);
+        emit("ld (iy+0),hl", 3);
+        emit("ld (iy+3),e", 3);
+        return;
+    }
     gen(nodes[n].a);
     emit("push hl", 1);                 /* [addr] */
     gen(nodes[n].b);                    /* E:UHL = rhs (HL: a shift count) */
@@ -1988,6 +2713,148 @@ static void gen(int n)
     }
 }
 
+/* -O: x & k as a condition, with k's top byte 0: the bytes of x that k
+ * reaches are masked in A, and Z says whether any bit was left. Returns 0
+ * if it did nothing. */
+static int mask_jump(int n, int when, int l)
+{
+    int a;
+    int k;
+    int c1;
+    int c0;
+
+    if (nodes[n].op != N_BIN + B_AND || nodes[n].okind != K_I)
+        return 0;
+    a = nodes[n].a;
+    k = nodes[n].b;
+    if (nodes[a].op == N_C) {
+        a = nodes[n].b;             /* k & x */
+        k = nodes[n].a;
+    }
+    if (nodes[k].op != N_C || (nodes[k].val & 0xFF0000) != 0)
+        return 0;
+    c1 = (nodes[k].val >> 8) & 255;
+    c0 = nodes[k].val & 255;
+    if (c1 == 0 && is_byte_load(a)) {
+        gen_load_a(a);
+    } else {
+        gen(a);
+        emit(c1 == 0 ? "ld a,l" : "ld a,h", 1);
+    }
+    if (c1 != 0 && c0 != 0) {
+        a_op(B_AND, c1);            /* H's bits, then L's: both bytes */
+        emit("ld b,a", 1);
+        emit("ld a,l", 1);
+        a_op(B_AND, c0);
+        emit("or b", 1);
+    } else if ((c1 | c0) == 255) {
+        emit("or a", 1);
+    } else {
+        a_op(B_AND, c1 | c0);
+    }
+    emit_jump(when ? C_NZ : C_Z, l);
+    return 1;
+}
+
+/* -O: jump to l if E:UHL is not 0 (nz), or if it is. HL is tested first
+ * (add hl,de / or a / sbc hl,de: Z iff HL = 0, whatever DE holds), then
+ * E. */
+static void long_jump(int nz, int l)
+{
+    int skip;
+
+    emit("add hl,de", 1);
+    emit("or a", 1);
+    emit("sbc hl,de", 2);
+    if (nz) {
+        emit_jump(C_NZ, l);
+        emit("ld a,e", 1);
+        emit("or a", 1);
+        emit_jump(C_NZ, l);
+    } else {
+        skip = new_label();
+        emit_jump(C_NZ, skip);
+        emit("ld a,e", 1);
+        emit("or a", 1);
+        emit_jump(C_Z, l);
+        emit_label(skip);
+    }
+}
+
+/* -O: a long == or != a constant: x ^ k is 0 iff they are equal. Returns
+ * 0 if it did nothing. */
+static int lcompare_jump(int n, int when, int l)
+{
+    int b;
+    int a;
+    int k;
+    int c[4];
+
+    b = nodes[n].op - N_BIN;
+    if (b != B_EQ && b != B_NE)
+        return 0;
+    a = nodes[n].a;
+    k = nodes[n].b;
+    if (nodes[a].op == N_C) {
+        a = nodes[n].b;             /* k == x */
+        k = nodes[n].a;
+    }
+    if (nodes[k].op != N_C)
+        return 0;
+    gen(a);
+    lconst_bytes(k, c);
+    lbitop(B_XOR, c);
+    long_jump((b == B_NE) == when, l);
+    return 1;
+}
+
+/* -O: a long x & k as a condition, with k's third byte 0: the bytes of x
+ * that k reaches are masked in A and or-ed together. Returns 0 if it did
+ * nothing. */
+static int lmask_jump(int n, int when, int l)
+{
+    static char *reg[3] = { "l", "h", "e" };
+    int a;
+    int k;
+    int c[4];
+    int m[3];
+    int i;
+    int left;
+
+    if (nodes[n].op != N_BIN + B_AND)
+        return 0;
+    a = nodes[n].a;
+    k = nodes[n].b;
+    if (nodes[a].op == N_C) {
+        a = nodes[n].b;             /* k & x */
+        k = nodes[n].a;
+    }
+    if (nodes[k].op != N_C)
+        return 0;
+    lconst_bytes(k, c);
+    if (c[2] != 0 || (c[0] | c[1] | c[3]) == 0)
+        return 0;
+    m[0] = c[0];
+    m[1] = c[1];
+    m[2] = c[3];
+    left = (m[0] != 0) + (m[1] != 0) + (m[2] != 0);
+    gen(a);
+    for (i = 0; i < 3; i++) {
+        if (m[i] == 0)
+            continue;
+        sprintf(fmt, "ld a,%s", reg[i]);
+        emit(fmt, 1);
+        a_op(B_AND, m[i]);
+        if (left < (m[0] != 0) + (m[1] != 0) + (m[2] != 0))
+            emit("or b", 1);        /* the bytes before */
+        left--;
+        if (left > 0)
+            emit("ld b,a", 1);
+    }
+    emit_jump(when ? C_NZ : C_Z, l);
+    return 1;
+}
+
 /* -O: a signed comparison as a jump, inline. Adding 0x800000 to both sides
  * flips their sign bits, which turns signed order into unsigned order, and
  * the carry of a subtraction gives that. x <= K is x < K + 1 (not for the
@@ -2084,12 +2951,21 @@ static void gen_jump(int n, int when, int l)
         return;
     }
     if (op >= N_BIN && nodes[n].okind == K_L && nodes[n].kind == K_I) {
+        if (optimize && lcompare_jump(n, when, l))
+            return;
         gen_operands_l(n);
         lbinop(op - N_BIN);             /* HL = 0/1, Z iff false */
         emit_jump(when ? C_NZ : C_Z, l);
         return;
     }
     if (nodes[n].kind == K_L) {
+        if (optimize) {
+            if (!lmask_jump(n, when, l)) {
+                gen(n);
+                long_jump(when, l);
+            }
+            return;
+        }
         gen_long_nz(n);
         emit_jump(when ? C_NZ : C_Z, l);
         return;
@@ -2177,6 +3053,8 @@ static void gen_jump(int n, int when, int l)
         emit_jump(when ? C_NZ : C_Z, l);
         return;
     }
+    if (optimize && mask_jump(n, when, l))
+        return;
     gen(n);
     emit("add hl,de", 1);
     emit("or a", 1);

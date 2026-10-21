@@ -351,10 +351,11 @@ int mos_i2c_read(int address, int size, unsigned char *buf)
 /* ---- FatFS ---------------------------------------------------------------------------- */
 
 /* MOS passes these on to FatFs's f_ functions (0x80 f_open, 0x81
- * f_close, ...), taking the C function's arguments in HL, DE and BC or C
- * - in order, except that ffs_stat takes the path in DE and the FILINFO
- * in HL - and returning FatFs's result in A. The structures are the
- * caller's, so they must stay put while MOS uses them (mos.h). */
+ * f_close, ...), taking the C function's arguments in HL, DE and BC or C,
+ * in order (so ffs_stat takes the FILINFO first, as MOS does, though
+ * FatFs's f_stat takes the path first), and returning FatFs's result in
+ * A. The structures are the caller's, so they must stay put while MOS
+ * uses them (mos.h). */
 
 /* 0x80: HL the FIL, DE the path, C the FA_ mode bits. */
 int ffs_fopen(FIL *fp, const char *path, int mode)
@@ -392,11 +393,10 @@ int ffs_fclose(FIL *fp)
 }
 
 /* 0x82 and 0x83: HL the FIL, DE the buffer, BC the count. MOS returns
- * the count transferred in BC: into the second local, n at (ix-6), and
- * from there into *done if done is not null. */
-int ffs_fread(FIL *fp, void *buf, unsigned int count, unsigned int *done)
+ * the count transferred in BC, which is the result, into n, the first
+ * local (ix-3) (AgonDev's form; the status in A is not kept). */
+unsigned int ffs_fread(FIL *fp, void *buf, unsigned int count)
 {
-    int r;
     unsigned int n;
 
     POLL();
@@ -407,18 +407,12 @@ int ffs_fread(FIL *fp, void *buf, unsigned int count, unsigned int *done)
         "ld a,0x82\n"
         "rst.lis 08h\n"
         "pop ix\n"
-        "ld (ix-6),bc\n"
-        "ld hl,0\n"
-        "ld l,a\n"
-        "ld (ix-3),hl");
-    if (done != 0)
-        *done = n;
-    return r;
+        "ld (ix-3),bc");
+    return n;
 }
 
-int ffs_fwrite(FIL *fp, const void *buf, unsigned int count, unsigned int *done)
+unsigned int ffs_fwrite(FIL *fp, const void *buf, unsigned int count)
 {
-    int r;
     unsigned int n;
 
     POLL();
@@ -429,13 +423,14 @@ int ffs_fwrite(FIL *fp, const void *buf, unsigned int count, unsigned int *done)
         "ld a,0x83\n"
         "rst.lis 08h\n"
         "pop ix\n"
-        "ld (ix-6),bc\n"
-        "ld hl,0\n"
-        "ld l,a\n"
-        "ld (ix-3),hl");
-    if (done != 0)
-        *done = n;
-    return r;
+        "ld (ix-3),bc");
+    return n;
+}
+
+/* AgonDev's getch: a key, as mos_getkey (mos.c) waits for one. */
+int getch(void)
+{
+    return mos_getkey();
 }
 
 /* 0x84: HL the FIL. The offset arrives as its low 24 bits at (ix+9) and
@@ -490,14 +485,14 @@ int ffs_feof(FIL *fp)
     return r;
 }
 
-/* 0x96: DE the path, HL the FILINFO (the one swapped pair). */
-int ffs_stat(const char *path, FILINFO *info)
+/* 0x96: HL the FILINFO, DE the path. */
+int ffs_stat(FILINFO *info, const char *path)
 {
     int r;
 
     POLL();
-    asm("ld de,(ix+6)\n"
-        "ld hl,(ix+9)\n"
+    asm("ld hl,(ix+6)\n"
+        "ld de,(ix+9)\n"
         "push ix\n"
         "ld a,0x96\n"
         "rst.lis 08h\n"

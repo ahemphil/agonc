@@ -276,14 +276,18 @@ static void declare_enumerator(int name, int val)
 
 /* "enum" [tag] ["{" enumerators "}"], at the "enum"; an enum type is int
  *
- * Each enumerator without '=' is one more than the one before, wrapped
- * to 24 bits, the width of int. */
+ * Each enumerator without '=' is one more than the one before, which
+ * after 8388607 int cannot hold: an error. The step is tested before it
+ * is added, never by letting v + 1 wrap: on the Agon int is 24 bits, and
+ * AgDev's clang, taking signed overflow as impossible, removed a test of
+ * the wrapped value from the stage-1 cc1. */
 static int enum_spec(void)
 {
     int name;
     int tg;
     int en;
     int v;
+    int at_max;
     int n;
 
     next();
@@ -313,6 +317,7 @@ static int enum_spec(void)
         add_tag(name, 1, scope_depth);
     }
     v = 0;
+    at_max = 0;
     n = 0;
     for (;;) {
         if (tok != TK_IDENT)
@@ -320,11 +325,14 @@ static int enum_spec(void)
         en = tok_name;
         next();
         if (accept(TK_P + '='))
-            v = const_expr();
-        if (n >= 127)
-            error("more than 127 enumerators in an enum");
+            v = enum_const_expr();
+        else if (at_max)
+            error("an enumerator's value does not fit in int (-8388608 to 8388607)");      /* one past 8388607 */
+        if (n >= 1023)
+            error("more than 1023 enumerators in an enum");     /* C99's minimum */
         declare_enumerator(en, v);
-        v = wrap24(v + 1);
+        at_max = v == 8388607;
+        v = at_max ? -8388607 - 1 : v + 1;
         n++;
         if (!accept(TK_P + ','))
             break;
@@ -525,6 +533,15 @@ static int subst(int t, int repl)
     return t;
 }
 
+/* A parameter's declarator (C99 6.7.5.2): its first brackets may hold
+ * static (a promise of at least n elements, which cc1 has no use for) and
+ * qualifiers, which go to the pointer the array parameter becomes:
+ * "int a[const 3]" is "int *const a". param_decl is 1 while a parameter's
+ * declarator has not yet met brackets, 2 after; param_quals gathers the
+ * qualifiers (suffixes). restrict the lexer has dropped already. */
+static int param_decl;
+static int param_quals;
+
 /* The parameter list after a declarator's '(' (already read), through
  * its ')'; returns the type of a function returning ret. Three forms:
  * "()", no prototype (nparams -1); an identifier list, the parameters of
@@ -594,9 +611,12 @@ static int param_list(int ret)
             in_params--;
             if (sc != SC_NONE)
                 error("storage class on a parameter");
+            param_decl = 1;
+            param_quals = 0;
             t = declarator(t, &name);
+            param_decl = 0;
             if (types[t].kind == TY_ARRAY)
-                t = ptr_to(types[t].base);
+                t = qualify(ptr_to(types[t].base), param_quals);
             if (types[t].kind == TY_FUNC)
                 t = ptr_to(t);          /* a function parameter is a pointer to it (C89 3.7.1) */
             if (is_void(t))
@@ -625,9 +645,25 @@ static int suffixes(int base)
 {
     int n;
     int t;
+    int is_static;
 
     if (accept(TK_P + '[')) {
         n = -1;
+        is_static = 0;
+        if (param_decl == 1) {
+            param_decl = 2;
+            while (tok == KW_STATIC || tok == KW_CONST || tok == KW_VOLATILE) {
+                if (strict)
+                    error("'static' or a qualifier in a parameter's brackets (a C99 feature)");
+                if (tok == KW_STATIC)
+                    is_static = 1;
+                else
+                    param_quals = param_quals | (tok == KW_CONST ? Q_CONST : Q_VOLATILE);
+                next();
+            }
+            if (is_static && tok == TK_P + ']')
+                error("'static' in a parameter's brackets needs the array's size");
+        }
         if (tok != TK_P + ']') {
             n = const_expr();
             if (n <= 0)
@@ -1270,10 +1306,43 @@ static void skip_initialiser(void)
 
 static int init_any(int t, int off);
 
+/* A local aggregate's bit-field initialisers that are not constants (C99,
+ * default mode), stored after the template's copy as `=` would store
+ * them: two fields may share a byte, so they cannot be 'D' records, which
+ * are keyed by bytes. Each is the struct's offset, the member and the
+ * expression; a later initialiser of the same field cancels one (bfd_n -1). */
+#define MAX_BFD 64
+static int bfd_off[MAX_BFD];
+static int bfd_m[MAX_BFD];
+static int bfd_n[MAX_BFD];
+static int nbfd;
+
+/* The deferred bit-field stores from first on into object lv, emitted (a
+ * declaration) or appended to *e with commas (a compound literal, e >= 0). */
+static int bfd_stores(int first, int lv, int e)
+{
+    int i;
+    int s;
+
+    for (i = first; i < nbfd; i++) {
+        if (bfd_n[i] < 0)
+            continue;
+        s = bitfield_init_store(lv, bfd_off[i], bfd_m[i], bfd_n[i]);
+        if (e >= 0) {
+            e = node(EN_COMMA, nodes[s].type, e, s, 0);
+        } else {
+            emit_rvalue(s);
+            emit_line("DROP");
+        }
+    }
+    return e;
+}
+
 /* Member m's initialiser, a bit-field's (an integer constant), into its
  * bytes of the struct at base: masked to the width, shifted to the
  * field's bit and merged into each byte it covers, the other fields' bits
- * kept. */
+ * kept. In a function's template (the default mode) a value that is not a
+ * constant is deferred (bfd_*), its bits 0 in the template. */
 static void bf_init(int m, int base)
 {
     int n;
@@ -1281,6 +1350,7 @@ static void bf_init(int m, int base)
     int mask;
     int mark;
     int off;
+    int i;
 
     mark = nnodes;
     if (pending_init >= 0) {
@@ -1293,15 +1363,31 @@ static void bf_init(int m, int base)
     } else {
         n = assign_expr();
     }
+    for (i = 0; i < nbfd; i++) {
+        if (bfd_off[i] == base && bfd_m[i] == m)
+            bfd_n[i] = -1;              /* a designator's later value replaces it */
+    }
     if (nodes[n].op != EN_NUM || !is_integer(nodes[n].type)) {
-        error("initialiser is not a constant");
+        if (local_template) {
+            if (nbfd >= MAX_BFD)
+                fatal("too many bit-fields with initialisers that are not constants (a cc1 table limit)");
+            bfd_off[nbfd] = base;
+            bfd_m[nbfd] = m;
+            bfd_n[nbfd] = n;
+            nbfd++;
+            keep_nodes = 1;
+        } else {
+            error("initialiser is not a constant");
+        }
         v = 0;
     } else if (types[members[m].type].kind == TY_BOOL) {
         v = nodes[n].val != 0;
     } else {
         v = nodes[n].val & (members[m].width < 24 ? (1 << members[m].width) - 1 : 0xFFFFFF);
     }
-    nnodes = mark;
+    if (!keep_nodes)
+        nnodes = mark;
+    keep_nodes = 0;
     mask = members[m].width < 24 ? (1 << members[m].width) - 1 : 0xFFFFFF;
     /* the field and its mask a byte at a time from its first; & 0xFFFF
      * drops the sign bits that >> copies in when the shifted value has
@@ -1628,6 +1714,7 @@ int compound_literal(int t)
     int save_template;
     int save_keeping;
     int save_pending;
+    int save_bfd;
 
     if (types[t].kind == TY_FUNC || is_void(t) || (type_size(t) == 0 && types[t].kind != TY_ARRAY)) {
         error("a compound literal of a function, void or an incomplete type");
@@ -1639,6 +1726,7 @@ int compound_literal(int t)
     save_template = local_template;
     save_keeping = keeping;
     save_pending = pending_init;
+    save_bfd = nbfd;
     frame_base = nrecs;
     frame_open = 0;
     local_template = in_function && !strict;
@@ -1665,10 +1753,12 @@ int compound_literal(int t)
         for (i = frame_base; i < nrecs; i++)
             if (recs[i].kind == 'D')
                 e = node(EN_COMMA, recs[i].a, e, deferred_store(lv, recs[i].off, recs[i].a, recs[i].b), 0);
+        e = bfd_stores(save_bfd, lv, e);
         e = node(EN_COMMA, ptr_to(t), e, node(EN_ADDR, ptr_to(t), lv, -1, 0), 0);
         e = node(EN_DEREF, t, e, -1, 0);
     }
     nrecs = frame_base;
+    nbfd = save_bfd;
     pool_used = save_pool;
     frame_base = save_base;
     frame_open = save_open;
@@ -2000,6 +2090,7 @@ static void local_decl(void)
                     mark = nnodes;
                     in_static_init = 1;
                     local_template = !strict;
+                    nbfd = 0;
                     static_init(&t);
                     local_template = 0;
                     in_static_init = 0;
@@ -2023,6 +2114,8 @@ static void local_decl(void)
                             emit_line("DROP");
                         }
                     }
+                    bfd_stores(0, node(EN_LVAR, t, -1, -1, l), -1);
+                    nbfd = 0;
                     nnodes = mark;
                 } else {
                     mark = nnodes;
@@ -2340,7 +2433,15 @@ static void statement(void)
             }
         } else {
             n = expression();
-            if (is_void(cur_ret)) {
+            if (is_void(cur_ret) && !strict && is_void(value_type_of(n))) {
+                /* return f(); with f void too: C forbids it, GCC allows
+                 * it, and so does the default mode, with a warning: f is
+                 * called, and the function returns */
+                warning("'return' with a void expression in a void function");
+                emit_rvalue(n);
+                emit_line("DROP");
+                emit_line("RETV");
+            } else if (is_void(cur_ret)) {
                 error("return with a value in a void function");
             } else if (is_struct(cur_ret) || is_mem8(cur_ret)) {
                 n = convert(n, cur_ret, "return");
@@ -2755,6 +2856,17 @@ static unsigned unit_hash(char *s)
     return h;
 }
 
+/* Diagnostics made at the unit's end about global i are placed where it
+ * was declared: its line, and its file, which for a function declared in
+ * a header is the header's, not the .c's that cpp's line markers have
+ * reached by now. */
+static void at_global(int i)
+{
+    tok_line = globals[i].line;
+    if (globals[i].file >= 0)
+        strcpy(cur_file, name_str(globals[i].file));
+}
+
 /* The unit's end: every tentative definition still without an initialised
  * one becomes a zero-filled object (C89 3.7.2); an array still of unknown
  * size gets one element. */
@@ -2767,7 +2879,7 @@ static void tentative_definitions(void)
     for (i = 0; i < nglobals; i++) {
         if (globals[i].kind != SK_VAR || !globals[i].tentative || globals[i].defined)
             continue;
-        tok_line = globals[i].line;
+        at_global(i);
         t = globals[i].type;
         if (types[t].kind == TY_ARRAY && types[t].count < 0) {
             warning_s("an array assumed to have one element: ", name_str(globals[i].name));
@@ -2870,11 +2982,11 @@ int main(int argc, char **argv)
     tentative_definitions();
     for (i = 0; i < nglobals; i++) {
         if (globals[i].kind == SK_FUNC && globals[i].sclass == SC_STATIC) {
-            tok_line = globals[i].line;
+            at_global(i);
             if (globals[i].used && !globals[i].defined)
                 error_s("static function used but never defined: ", name_str(globals[i].name));
             else if (!globals[i].used && globals[i].defined && !warnings_off)
-                warning("unused static function");
+                warning_s("unused static function: ", name_str(globals[i].name));
         }
     }
     lex_close();

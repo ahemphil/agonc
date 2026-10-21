@@ -223,13 +223,16 @@ int mos_feof(int handle)
 }
 
 /* MOS 0x10 mos_oscli: HL a command line, run as if typed at the MOS
- * prompt; A the status. */
-int mos_oscli(const char *command)
+ * prompt; A the status. BC and DE carry argv and argc, as AgonDev's
+ * mos_oscli passes them; MOS 2.3.3 does not use them. */
+int mos_oscli(const char *command, char **argv, int argc)
 {
     int r;
 
     POLL();
     asm("ld hl,(ix+6)\n"
+        "ld bc,(ix+9)\n"
+        "ld de,(ix+12)\n"
         "ld a,0x10\n"
         "rst.lis 08h\n"
         "ld hl,0\n"

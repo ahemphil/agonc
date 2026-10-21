@@ -44,6 +44,8 @@ void want(int n, ...)
 unsigned char wave[3] = { 0x10, 0x20, 0x30 };
 unsigned char phases[5] = { 1, 127, 10, 0, 0 };
 int steps[4] = { 40, 6, -30, 4 };
+short adsr[6] = { 127, 10, 100, 0, 0, 50 };     /* AgonDev's: level, duration for each phase */
+short dsteps[4] = { 40, 6, -30, 4 };
 int ids[2] = { 5, 6 };
 unsigned char tilepix[64];
 unsigned char args[3] = { 9, 8, 7 };
@@ -69,13 +71,16 @@ void test_audio(void)
     vdp_audio_set_buffer_repeat_length(0, 300, 7L); want(11, 23, 0, 0x85, 0, 5, 8, 0x2C, 1, 7, 0, 0);
     vdp_audio_volume_envelope_disable(1); want(6, 23, 0, 0x85, 1, 6, 0);
     vdp_audio_volume_envelope_ADSR(1, 400, 100, 100, 2000); want(13, 23, 0, 0x85, 1, 6, 1, 0x90, 1, 100, 0, 100, 0xD0, 7);
-    vdp_audio_volume_envelope_multiphase_ADSR(1); want(6, 23, 0, 0x85, 1, 6, 2);
+    vdp_audio_volume_envelope_multiphase_ADSR(1, 1, 1, 1, adsr);   /* AgonDev's form */
+    want(18, 23, 0, 0x85, 1, 6, 2, 1, 127, 10, 0, 1, 100, 0, 0, 1, 0, 50, 0);
     vdp_audio_volume_envelope_multiphase(1, phases, 5); want(11, 23, 0, 0x85, 1, 6, 2, 1, 127, 10, 0, 0);
     vdp_audio_frequency_envelope_disable(1); want(6, 23, 0, 0x85, 1, 7, 0);
-    vdp_audio_frequency_envelope_stepped(1, 2, 1, 30); want(10, 23, 0, 0x85, 1, 7, 1, 2, 1, 30, 0);
+    vdp_audio_frequency_envelope_stepped(1, 2, 1, 30, dsteps);    /* AgonDev's form */
+    want(18, 23, 0, 0x85, 1, 7, 1, 2, 1, 30, 0, 40, 0, 6, 0, 0xE2, 0xFF, 4, 0);
     vdp_audio_frequency_envelope(1, 3, 30, steps, 2);
     want(18, 23, 0, 0x85, 1, 7, 1, 2, 3, 30, 0, 40, 0, 6, 0, 0xE2, 0xFF, 4, 0);
     vdp_audio_enable_channel(5); want(5, 23, 0, 0x85, 5, 8);
+    vdp_audio_play_sample(2, 100); want(10, 23, 0, 0x85, 2, 0, 100, 0, 0, 0, 0);
     vdp_audio_disable_channel(5); want(5, 23, 0, 0x85, 5, 9);
     vdp_audio_reset_channel(5); want(5, 23, 0, 0x85, 5, 10);
     vdp_audio_sample_seek(1, 0x10000L); want(8, 23, 0, 0x85, 1, 11, 0, 0, 1);
@@ -150,6 +155,8 @@ void test_more(void)
     vdp_copper_set_palette_entry(10, 3, 255, 128, 0); want(10, 23, 0, 0xC4, 2, 10, 0, 3, 255, 128, 0);
     vdp_copper_set_signal_list(20); want(6, 23, 0, 0xC4, 3, 20, 0);
     vdp_copper_reset_signal_list(); want(4, 23, 0, 0xC4, 4);
+    vdp_copper_enable(); want(7, 23, 0, 0xF8, 0x10, 0x03, 0, 0);
+    vdp_copper_disable(); want(5, 23, 0, 0xF9, 0x10, 0x03);
     vdp_tile_bank_init(0); want(8, 23, 0, 0xC2, 0, 0, 0, 0, 0);
     tilepix[0] = 0xC3;
     tilepix[63] = 0x3C;

@@ -1,3 +1,6 @@
 # SDCC regression tests: tests skipped by hand, each with its reason.
 gcc-torture-execute-20021120-1.c LIMIT (one function beyond cc2's 4,000 instructions; GCC itself skips it on small targets as memory tight)
 bug-223113.c UB (defines the library's puts, which C89 leaves undefined; ld reports the duplicate)
+gcc-torture-execute-pr81913.c INT32 (~0xba64fc as a 32-bit int, as GCC's own pr81913.c in gcc.manual.txt)
+swap.c INT32 (its uint32 is unsigned int outside __SDCC, then swapped as four bytes)
+snprintf_type_PTR.c IMPL (expects SDCC's own %p format, "X:0x00aabb"; %p's output is implementation-defined)

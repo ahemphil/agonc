@@ -510,6 +510,7 @@ int add_global(int name, int kind, int type, int sclass)
     globals[nglobals].defined = 0;
     globals[nglobals].used = 0;
     globals[nglobals].line = tok_line;
+    globals[nglobals].file = cur_file_name;
     globals[nglobals].val = 0;
     global_of[name] = nglobals;
     globals[nglobals].implicit = 0;

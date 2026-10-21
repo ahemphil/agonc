@@ -10,6 +10,7 @@
  */
 
 #include <agon/uart.h>
+#include <agon/mos.h>
 
 extern char __intflag;
 void __interrupted(void);
@@ -121,3 +122,36 @@ int uart_write(const char *p, int n)
     return i;
 }
 
+/* ---- AgonDev's mos_ugetc_nb ------------------------------------------------ */
+
+/* UART1's line status register (eZ80 port 0xD5), whose bit 0 says a byte
+ * has arrived, and its receive buffer (port 0xD0), read with in0, which
+ * takes the port as a constant; the byte into r, the first local. */
+static int uart1_status(void)
+{
+    int r;
+
+    asm("in0 a,(0xD5)\n"
+        "ld hl,0\n"
+        "ld l,a\n"
+        "ld (ix-3),hl");
+    return r;
+}
+
+static int uart1_data(void)
+{
+    int r;
+
+    asm("in0 a,(0xD0)\n"
+        "ld hl,0\n"
+        "ld l,a\n"
+        "ld (ix-3),hl");
+    return r;
+}
+
+/* A byte from UART1 if one has arrived, else -1 at once: not a MOS call,
+ * so it never waits (mos_ugetc and uart_getc do). */
+int mos_ugetc_nb(void)
+{
+    return (uart1_status() & 1) ? uart1_data() : -1;
+}
