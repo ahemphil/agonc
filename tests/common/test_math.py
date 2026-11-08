@@ -97,6 +97,8 @@ DBL_MAX = 1.7976931348623157e308
 
 
 def cc_run(cc, args):
+    if "-c" not in args:
+        args = args + ["-lm"]           # a link: glibc keeps the PC's libm apart (MinGW has one too)
     r = subprocess.run([cc] + args, capture_output=True, text=True)
     return r.stderr.strip()[:300] if r.returncode else None
 
@@ -201,9 +203,10 @@ def main():
         cc_run(cc, C99 + RENAMED + ["-c", "-o", o("math99.o"), src("lib/libc/math99.c")]) or \
         cc_run(cc, C99 + RENAMED + ["-c", "-o", o("mathf.o"), src("lib/libc/mathf.c")]) or \
         cc_run(cc, C89 + ["-DSOFTFP_FMA=1", "-c", "-o", o("softfp.o"), src("src/cc1/softfp.c")]) or \
+        cc_run(cc, C89 + ["-I", src("src/cc1"), "-c", "-o", o("math_shim.o"), src("tests/common/math_shim.c")]) or \
         cc_run(cc, ["-std=c99", "-Wall", "-Werror", "-O2", "-ffp-contract=off", "-o", o("t_math_host" + EXE),
-                    src("tests/common/t_math_host.c"), o("math.o"), o("softfp.o")])
-    objs = [o("math.o"), o("math99.o"), o("mathf.o"), o("softfp.o")]
+                    src("tests/common/t_math_host.c"), o("math.o"), o("softfp.o"), o("math_shim.o")])
+    objs = [o("math.o"), o("math99.o"), o("mathf.o"), o("softfp.o"), o("math_shim.o")]
     if err:
         problems = ["host build: " + err]
         guard = ["not run"]
@@ -240,7 +243,7 @@ def main():
     failed += report(f"R  C99's other functions, double and float, against true values ({REF_CASES} cases each)",
                      problems)
 
-    problems = ["host build: " + err] if err else device_pair("t_math", [o("math.o"), o("softfp.o")], DEVICE_CASES)
+    problems = ["host build: " + err] if err else device_pair("t_math", [o("math.o"), o("softfp.o"), o("math_shim.o")], DEVICE_CASES)
     failed += report(f"A  built by agonc, on the emulator: the PC's checksums ({DEVICE_CASES} cases each) and "
                      "the special cases", problems)
     problems = ["host build: " + err] if err else device_pair("t_math99", objs, DEVICE_CASES)

@@ -3,8 +3,9 @@
  * arguments over each function's range, the difference in units in the
  * last place. The exact functions (sqrt, floor, ceil, fabs, fmod, modf,
  * frexp, ldexp) must agree exactly; the rest within 1 ulp, or 2 for sinh,
- * cosh and tanh (fdlibm's, whose own error reaches 1.8 ulp in tanh, where
- * the PC's is below 1) and log10 (both below 1, in opposite directions).
+ * cosh (fdlibm's) and log10 (both below 1, in opposite directions), and 3
+ * for tanh: fdlibm's own error reaches 1.95 ulp, and glibc's tanh 1.05 ulp
+ * the other way (at tanh(-0.20397178628445559), the two 3 ulps apart).
  *
  *     t_math_host cases [guard]
  *
@@ -133,7 +134,7 @@ static struct one ones[] = {
     { "log10", am_log10, log10, -1074, 1023, 0, 2 },
     { "sinh", am_sinh, sinh, -40, 10, 1, 2 },
     { "cosh", am_cosh, cosh, -40, 10, 1, 2 },
-    { "tanh", am_tanh, tanh, -40, 6, 1, 2 },
+    { "tanh", am_tanh, tanh, -40, 6, 1, 3 },
     { "sqrt", am_sqrt, sqrt, -1074, 1023, 0, 0 },
     { "floor", am_floor, floor, -10, 60, 1, 0 },
     { "ceil", am_ceil, ceil, -10, 60, 1, 0 },

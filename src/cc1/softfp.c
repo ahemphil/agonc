@@ -869,7 +869,7 @@ static void mul64_jam(struct u64 *r, const struct u64 *a, const struct u64 *b)
         ld      (iy+25), hl
         ld      (iy+28), hl
         ld      (iy+31), l
-        ld      c, 0                    ; i: a's byte
+        ld      c, 0                    ; i: the byte of a
 @outer:
         lea     hl, iy+0
         ld      de, 0
@@ -933,7 +933,7 @@ static void mul64_jam(struct u64 *r, const struct u64 *a, const struct u64 *b)
         inc     hl
         inc     hl
         inc     hl
-        set     0, (hl)                 ; lo's low byte
+        set     0, (hl)                 ; the low byte of lo
         jr      @done
 ; product[i+j], product[i+j+1] += a[i] * e, the carry on up; hl to i+j+1
 @step:

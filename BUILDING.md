@@ -263,18 +263,18 @@ The finished compiler, from either path, should be exactly these files:
 
 | File | Size (bytes) | SHA-256 |
 |---|---:|---|
-| `/mos/agonc.bin` | 22,775 | `f5c776305f3aa46d03ff99a0a11465993f1c80bea53c41774a8a73196c6cefbf` |
+| `/mos/agonc.bin` | 22,775 | `ba6839249d94d99a3e8bd2ec56e8e82e42f214d8d55f23b8bb64706a2d5b5eaa` |
 | `/bin/agonc/cpp.bin` | 52,048 | `113d9dd19a563a2eddea3b0884d665b432eec600d0821fc8eb9ccfe846e9d207` |
 | `/bin/agonc/cc1.bin` | 156,713 | `886b667b2a39deea8d5761ac4c8dccb8b84c21a05e7c4dac71b67def7d4a90d1` |
-| `/bin/agonc/cc2.bin` | 92,405 | `59fea58d06519df0e1fb4022e99916d527ce0561b1799de5175cf7ea79b0fef0` |
+| `/bin/agonc/cc2.bin` | 92,431 | `082a526574e8070c70cfe43fca1d969d13f2b525c7abf71153fb448cacf7cef0` |
 | `/bin/agonc/ld.bin` | 40,738 | `ccc4ea368bccc31bb078cdd114b7bd14234daa69d26224a651f49549e20a5d2a` |
 | `/lib/agonc/libc.s` | 182,275 | `4dc93817ea48231c49ae6665bf7ad464cb8e98bd1c94027a7b3ce8b29b78adae` |
-| `/lib/agonc/libm.s` | 738,501 | `54f911ad109bae63f8a00496fb8bc9a5eb83f4d9aa10fadde87e97758391825f` |
+| `/lib/agonc/libm.s` | 738,511 | `f3b227b7315ba5f4462c44a792cf57e61a198e46d46adf3b5f90b506a1817149` |
 | `/lib/agonc/libagon.s` | 195,735 | `f820cebb5c3c06d5f0b30f5453545abc4f2fba646e5c7c561e6226bc7a8fc815` |
 | `/lib/agonc/crt0.idx` | 901 | `05e16fb84aab395326cc33b05fc0abb619b1129229c98089a9b48b0a5996f6e9` |
 | `/lib/agonc/rt.idx` | 3,506 | `5dd66a107d4007e398922edca5bbc2ab720d9ef64248986172265ef61f902c4f` |
 | `/lib/agonc/libc.idx` | 28,090 | `e3db21d12c3680f24f7cdf173e3d9bcf96973690f4afdb76fa05ada407cba829` |
-| `/lib/agonc/libm.idx` | 91,558 | `0c1179c0c4ff8beae0e17032f76c816b39a7ced142ce828fa6542ff1deb94525` |
+| `/lib/agonc/libm.idx` | 91,558 | `055793a567a63859baeb2eeec6603f88ea2488faf607136948245e98ca342ae8` |
 | `/lib/agonc/libagon.idx` | 47,796 | `cf8217584959699f4d0d19f91c33b025f1412175ffa78dc30ecbfdc77dc9e6e1` |
 
 On a PC: `sha256sum` (Linux), `shasum -a 256` (macOS), or

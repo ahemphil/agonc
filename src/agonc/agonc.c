@@ -51,7 +51,7 @@
 #include <string.h>
 #include "sys.h"
 
-#define VERSION "agonc 1.1.0-beta.3 (Agon C, language C99; C89 with -ansi)\n"
+#define VERSION "agonc 1.1.0-beta.4 (Agon C, language C99; C89 with -ansi)\n"
 
 /* The tables, as the Agon has them. The PC driver has the same limits, so
  * that what builds on a PC builds on the Agon: a path under $AGONC_ROOT
@@ -250,7 +250,7 @@ static char *join(char *dst, char *a, char *b, int cut, char *c)
 {
     int nb;
 
-    nb = cut ? ext_part(b) - b : strlen(b);
+    nb = cut ? (int)(ext_part(b) - b) : (int)strlen(b);
     if (agon_len(a) + nb + strlen(c) >= PATH_SIZE || strlen(a) + nb + strlen(c) >= PATH_BUF) {
         error("path too long: ", *b ? b : a);   /* b is "" when the root itself is too long */
         return NULL;

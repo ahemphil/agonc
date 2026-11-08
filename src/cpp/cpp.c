@@ -2596,7 +2596,7 @@ static void cmd_define(char *s)
     int n;
 
     eq = strchr(s, '=');
-    n = eq == NULL ? strlen(s) : eq - s;
+    n = eq == NULL ? (int)strlen(s) : (int)(eq - s);
     if (n <= 0 || n > 63 || n + 3 > CPP_LINE) {
         fprintf(stderr, "cpp: bad -D %s\n", s);
         exit(200);

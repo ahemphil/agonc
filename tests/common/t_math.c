@@ -242,7 +242,10 @@ static void specials(void)
     t(DBL_MAX, 0x7FEFFFFFUL, 0xFFFFFFFFUL, 0);
     t(DBL_MIN, 0x00100000UL, 0, 0);
     t(DBL_EPSILON, 0x3CB00000UL, 0, 0);
-    t(LDBL_MAX, 0x7FEFFFFFUL, 0xFFFFFFFFUL, 0);
+    /* long double is double for agonc (and MinGW); where the PC's is wider
+     * (128 bits on 64-bit ARM Linux) its LDBL_MAX is beyond a double, so
+     * the PC's build checks DBL_MAX again in its place */
+    t(sizeof(long double) == sizeof(double) ? (double)LDBL_MAX : DBL_MAX, 0x7FEFFFFFUL, 0xFFFFFFFFUL, 0);
     ti(FLT_RADIX, 2);
     ti(FLT_MANT_DIG, 24);
     ti(DBL_MANT_DIG, 53);

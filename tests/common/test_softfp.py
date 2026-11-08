@@ -37,8 +37,9 @@ FLAGS = ["-std=c89", "-pedantic", "-Wall", "-Wextra", "-Werror", "-Wno-unused-pa
 
 def host_build(cc, name, sources):
     exe = os.path.join(REPO, OUT, name + EXE)
+    # -lm last: glibc keeps sqrt and sqrtf in libm (MinGW's C library has them too)
     r = subprocess.run([cc] + FLAGS + ["-I", os.path.join(REPO, "src", "cc1"), "-o", exe] +
-                       [os.path.join(REPO, s) for s in sources], capture_output=True, text=True)
+                       [os.path.join(REPO, s) for s in sources] + ["-lm"], capture_output=True, text=True)
     return exe, (r.stderr.strip()[:300] if r.returncode else None)
 
 

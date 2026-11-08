@@ -238,7 +238,10 @@ int main(int argc, char **argv)
         q1 = 0;
         q2 = 0;
         d += ulps(am_remquo(x, y, &q1), remquo(x, y, &q2));
-        d += (uint64_t)((q1 & 7) != (q2 & 7) || (q1 < 0) != (q2 < 0));
+        /* C99 asks for the quotient's sign and its low 3 bits; when those
+         * are 0, glibc returns 0, which has no sign (ours, and MinGW's,
+         * return more of the quotient) */
+        d += (uint64_t)((q1 & 7) != (q2 & 7) || ((q1 & 7) != 0 && (q1 < 0) != (q2 < 0)));
         d += ulps(am_copysign(x, y), copysign(x, y)) + ulps(am_fdim(x, y), fdim(x, y));
         d += ulps(am_fmax(x, y), fmax(x, y)) + ulps(am_fmin(x, y), fmin(x, y));
         d += ulps(am_nextafter(x, y), nextafter(x, y));

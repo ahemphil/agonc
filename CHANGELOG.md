@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): a version like
 1.1.0-beta.1 is a pre-release of 1.1.0.
 
+## 1.1.0-beta.4 (2026-11-07)
+
+- **`make cross` works with gcc** as the PC's compiler (`HOSTCC=gcc`), as
+  well as clang: gcc stopped at two apostrophes in assembly comments,
+  which it reads even in code it skips, and at three warnings clang does
+  not give (two `?:` mixing signed and unsigned operands, a `sprintf` it
+  judged could overflow). The compiler gcc builds produces the same files,
+  byte for byte, as the one clang builds.
+- **The maths tests' PC builds work on Linux** (glibc, 64-bit) as well as
+  Windows; the library itself is unchanged.
+
 ## 1.1.0-beta.3 (2026-10-20)
 
 - **Faster code for constant operands** (with `-O`, the default): on

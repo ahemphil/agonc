@@ -57,7 +57,7 @@ itself. No PC is needed to use it. It compiles C99, all but variable-length
 arrays, complex numbers and the wide-character library, with its standard
 library, and strict ANSI C89 with `-ansi`; and it compiles itself.
 
-**This is a beta: version 1.1.0-beta.3.** It
+**This is a beta: version 1.1.0-beta.4.** It
 passes its own tests and three free C test suites, and it has run on real
 hardware, but few people have used it yet. Reports of anything that goes
 wrong are very welcome ([Contributing](#contributing)).
@@ -98,7 +98,7 @@ emulator.
 
 ## Install
 
-Download `agonc-1.1.0-beta.3.zip` from the
+Download `agonc-1.1.0-beta.4.zip` from the
 [Releases page](https://github.com/ahemphil/agonc/releases) and unzip it
 onto the root of the Agon's SD card, merging its folders with the
 ones already there. It adds `/mos/agonc.bin`, `/bin/agonc/`, `/lib/agonc/`,

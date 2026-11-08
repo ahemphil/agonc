@@ -16,7 +16,8 @@ formats our C library does not implement. In lib/ as well: no #asm/#endasm
 users' programs), except in the assembly branch of an `#if NAME_ASM` group
 (FP_ASM, I64_ASM, STR_ASM) that has an `#else` with the same code in C:
 assembly only beside a working C version (softfp.c's and int64.c's
-kernels, string.c's busiest functions). Then
+kernels, string.c's busiest functions), and no unpaired quote on such a
+block's lines, which gcc reports even in a skipped block. Then
 bootstrap/*.rsp against the source folders. Exit status 0 if nothing was
 found.
 """
@@ -91,7 +92,7 @@ def lint_file(path):
             problems.append(f"{where}: '//' comment (not C89)")
         if len(rawline) > 250:
             problems.append(f"{where}: line longer than 250 characters")
-    return problems + lint_hashasm(path, code)
+    return problems + lint_hashasm(path, code) + lint_asm_quotes(path, raw)
 
 
 def lint_hashasm(path, code):
@@ -116,6 +117,24 @@ def lint_hashasm(path, code):
         elif HASHASM_RE.search(line) and not any(g[0] and g[1] for g in stack):
             problems.append(f"{rel}:{n}: #asm/#endasm in our own source; use asm(\"...\") "
                             f"(or an #if NAME_ASM group with its C under #else)")
+    return problems
+
+
+def lint_asm_quotes(path, raw):
+    """No unpaired ' or " on an #asm block's lines. A host compiler skips
+    the block (it is under #if NAME_ASM) but still reads its lines as C
+    tokens, and gcc reports a quote with no partner there ("missing
+    terminating ' character", an error under -Werror); clang does not. An
+    assembly comment's apostrophe ("; a's byte") is the usual cause."""
+    problems = []
+    inside = False
+    for n, line in enumerate(raw.split("\n"), 1):
+        m = HASHASM_RE.search(line)
+        if m:
+            inside = m.group(1) == "asm"
+        elif inside and (line.count("'") % 2 or line.count('"') % 2):
+            problems.append(f"{os.path.relpath(path, REPO)}:{n}: unpaired quote in an #asm block "
+                            "(gcc reports it even where the block is skipped)")
     return problems
 
 
@@ -148,7 +167,8 @@ def main():
             if name.endswith((".c", ".h")):
                 path = os.path.join(dirpath, name)
                 with open(path, encoding="ascii") as f:
-                    problems += lint_hashasm(path, strip_comments_and_strings(f.read()))
+                    raw = f.read()
+                problems += lint_hashasm(path, strip_comments_and_strings(raw)) + lint_asm_quotes(path, raw)
     problems += lint_responses()
     for p in problems:
         print(p)

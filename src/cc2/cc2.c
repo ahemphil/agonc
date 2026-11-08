@@ -5049,8 +5049,11 @@ static void data_item(int print)
         if (print)
             return;
         asm_name(fmt, tok[1]);
-        sprintf(buf, ";;sect data %s s\n%s:\n", fmt, fmt);
-        out_str(out_f, buf);
+        out_str(out_f, ";;sect data ");         /* in pieces: the name twice */
+        out_str(out_f, fmt);                    /* could overrun buf, gcc says */
+        out_str(out_f, " s\n");
+        out_str(out_f, fmt);
+        out_str(out_f, ":\n");
         write_db(tok[2], 0);
         out_str(out_f, "\tdb 0\n");
         return;
